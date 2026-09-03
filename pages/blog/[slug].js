@@ -148,5 +148,4 @@ export async function getStaticProps({ params }) {
     ? posts.filter((p) => p.slug !== post.slug).slice(0, 2)
     : [];
   return { props: { post, related } };
-            }
-
+}
