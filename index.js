@@ -1,124 +1,305 @@
-import Link from "next/link";
-import Layout from "../../components/Layout";
-import { getAllPosts } from "../../lib/posts";
+import { useState } from 'react';
+import Head from 'next/head';
+import Link from 'next/link';
+import Layout from '../components/Layout';
+import { getAllPosts } from '../lib/posts';
 
-export default function BlogIndex({ posts }) {
+export default function Home({ allPosts }) {
+  const [url, setUrl] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState('');
+
+  const handleDownload = async (e) => {
+    e.preventDefault();
+    if (!url.trim()) return;
+
+    setLoading(true);
+    setError('');
+    setResult(null);
+
+    try {
+      const res = await fetch('/api/parse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to fetch video details.');
+      setResult(data);
+    } catch (err) {
+      setError(err.message || 'Something went wrong. Please check your link.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePaste = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) setUrl(text);
+    } catch (err) {
+      console.error('Failed to read clipboard');
+    }
+  };
+
   return (
-    <Layout
-      title="BiliSave Blog - Guides & Tips"
-      description="Articles about video quality, streaming formats, and downloading responsibly."
-    >
-      <div className="content-page" style={{ maxWidth: "860px", padding: "40px 16px 80px" }}>
-        
-        {/* Sleek Hero Header */}
-        <div style={{ textAlign: "center", marginBottom: "40px" }}>
-          <div className="eyebrow eyebrow-center" style={{ marginBottom: "12px", background: "rgba(255, 8, 68, 0.08)", color: "#ff0844", border: "1px solid rgba(255, 8, 68, 0.15)" }}>
-            THE BLOG & GUIDES
+    <Layout>
+      {/* Hero Section */}
+      <section className="hero-section">
+        <div className="container" style={{ maxWidth: '640px' }}>
+          <div className="badge-tag">
+            <span>🔥</span> Fast & Free Bilibili Downloader
           </div>
-          <h1 style={{ fontSize: "clamp(1.8rem, 4.5vw, 2.5rem)", fontWeight: "900", letterSpacing: "-0.03em", marginBottom: "12px", color: "var(--text-main)" }}>
-            Everything You Need to Know <span style={{ background: "var(--primary-gradient)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>About Downloading</span>
+          <h1 className="hero-title">
+            Download Bilibili Videos <br />
+            <span className="title-accent">in HD Quality</span>
           </h1>
-          <p className="subtitle" style={{ textAlign: "center", margin: "0 auto", fontSize: "1rem", color: "var(--text-muted)", maxWidth: "540px", lineHeight: "1.6" }}>
-            Expert guides, quality breakdowns, and safe streaming tips structured for a seamless reading experience.
+          <p className="hero-desc">
+            Paste your Bilibili link below to instantly extract and download your favorite videos, anime, and clips without watermark.
           </p>
+
+          <form onSubmit={handleDownload} className="input-card">
+            <div className="input-group">
+              <input
+                type="text"
+                placeholder="Paste Bilibili link here (bilibili.com or b23.tv)..."
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+              />
+              <button type="button" onClick={handlePaste} className="paste-btn">
+                📋 Paste
+              </button>
+            </div>
+            <button type="submit" className="btn-main" disabled={loading}>
+              {loading ? 'Processing Video...' : 'Download Now 🚀'}
+            </button>
+          </form>
+
+          {error && (
+            <div style={{ marginTop: '16px', color: '#ff0844', background: '#fff1f2', padding: '12px', borderRadius: '12px', fontSize: '0.9rem', fontWeight: 600 }}>
+              {error}
+            </div>
+          )}
+
+          {result && (
+            <div style={{ marginTop: '24px', background: '#fff', padding: '20px', borderRadius: '16px', border: '1px solid #e2e8f0', textAlign: 'left', display: 'flex', gap: '16px', alignItems: 'center' }}>
+              {result.thumbnail && (
+                <img src={result.thumbnail} alt="Thumbnail" style={{ width: '120px', height: '75px', objectFit: 'cover', borderRadius: '8px' }} />
+              )}
+              <div style={{ flex: 1, overflow: 'hidden' }}>
+                <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '6px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {result.title || 'Bilibili Video'}
+                </h3>
+                {result.downloadUrl && (
+                  <a href={result.downloadUrl} target="_blank" rel="noreferrer" style={{ display: 'inline-block', background: '#10b981', color: '#fff', padding: '8px 16px', borderRadius: '8px', fontSize: '0.85rem', fontWeight: 750, textDecoration: 'none' }}>
+                    Download MP4 📥
+                  </a>
+                )}
+              </div>
+            </div>
+          )}
+
+          <div className="trust-bar">
+            <span className="trust-item">⚡ Ultra Fast</span>
+            <span className="trust-item">🛡️ 100% Secure</span>
+            <span className="trust-item">✨ No Registration</span>
+          </div>
         </div>
+      </section>
 
-        {/* Premium Post Cards Grid */}
-        <div className="post-list" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: "24px" }}>
-          {posts.map((post, index) => {
-            const gradients = [
-              "linear-gradient(135deg, #ff0844 0%, #ff4e50 100%)",
-              "linear-gradient(135deg, #f59e0b 0%, #ea580c 100%)",
-              "linear-gradient(135deg, #3b82f6 0%, #4f46e5 100%)",
-              "linear-gradient(135deg, #10b981 0%, #059669 100%)"
-            ];
-            const cardBg = post.gradient || gradients[index % gradients.length];
+      {/* How to Download Section (Texts Only) */}
+      <section className="howto-section" style={{ paddingBottom: '30px' }}>
+        <div className="container" style={{ maxWidth: '920px' }}>
+          <div style={{ textAlign: 'center', marginBottom: '32px' }}>
+            <div className="eyebrow" style={{ background: 'rgba(255, 8, 68, 0.08)', color: '#ff0844', border: '1px solid rgba(255, 8, 68, 0.15)' }}>
+              SIMPLE STEPS
+            </div>
+            <h2 className="howto-main-title">How to Download Bilibili Videos</h2>
+            <p className="howto-subtitle">Follow these 3 easy steps to save any video instantly.</p>
+          </div>
 
-            return (
-              <Link 
-                key={post.slug} 
-                href={`/blog/${post.slug}`} 
-                className="post-card"
-                style={{ 
-                  borderRadius: "24px", 
-                  background: "#ffffff",
-                  border: "1px solid rgba(226, 232, 240, 0.9)",
-                  boxShadow: "0 10px 30px -5px rgba(0, 0, 0, 0.05), 0 0 0 1px rgba(0, 0, 0, 0.01)",
-                  transition: "all 0.25s cubic-bezier(0.16, 1, 0.3, 1)",
-                  overflow: "hidden",
-                  display: "flex",
-                  flexDirection: "column",
-                  textDecoration: "none"
-                }}
-              >
-                {/* Visual Gradient Banner Header */}
-                <div className="post-thumb" style={{ background: cardBg, height: "150px", position: "relative" }}>
-                  <div className="thumb-visual" style={{ padding: "18px 20px", height: "100%", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
-                    <div className="thumb-top-row" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      {post.category ? (
-                        <span className="thumb-tag" style={{ background: "rgba(255, 255, 255, 0.22)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", border: "1px solid rgba(255, 255, 255, 0.35)", color: "#fff", fontWeight: "800", fontSize: "0.68rem", padding: "5px 12px", borderRadius: "99px", letterSpacing: "0.5px", textTransform: "uppercase" }}>
-                          {post.category}
-                        </span>
-                      ) : <span />}
-                      <div className="thumb-icon-badge" style={{ width: "42px", height: "42px", borderRadius: "12px", background: "rgba(255, 255, 255, 0.25)", border: "1px solid rgba(255, 255, 255, 0.4)", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 8px 16px rgba(0,0,0,0.15)" }}>
-                        <span style={{ fontSize: "1.35rem", lineHeight: 1 }}>{post.emoji || "📄"}</span>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '20px' }}>
+            
+            <div className="howto-card" style={{ padding: '32px 24px', alignItems: 'flex-start', textAlign: 'left' }}>
+              <div className="howto-badge" style={{ marginBottom: '14px' }}>1</div>
+              <h3 className="howto-step-title" style={{ fontSize: '1.15rem', marginBottom: '8px' }}>Copy Video Link</h3>
+              <p className="howto-step-desc" style={{ fontSize: '0.9rem', margin: 0 }}>
+                Open the Bilibili app or website, choose the video you want to download, and copy its share link or URL from the address bar.
+              </p>
+            </div>
+
+            <div className="howto-card" style={{ padding: '32px 24px', alignItems: 'flex-start', textAlign: 'left' }}>
+              <div className="howto-badge" style={{ marginBottom: '14px' }}>2</div>
+              <h3 className="howto-step-title" style={{ fontSize: '1.15rem', marginBottom: '8px' }}>Paste into Downloader</h3>
+              <p className="howto-step-desc" style={{ fontSize: '0.9rem', margin: 0 }}>
+                Return to Bili Save, paste your copied link into the input box at the top of the page, and click the download button.
+              </p>
+            </div>
+
+            <div className="howto-card" style={{ padding: '32px 24px', alignItems: 'flex-start', textAlign: 'left' }}>
+              <div className="howto-badge" style={{ marginBottom: '14px' }}>3</div>
+              <h3 className="howto-step-title" style={{ fontSize: '1.15rem', marginBottom: '8px' }}>Save & Enjoy</h3>
+              <p className="howto-step-desc" style={{ fontSize: '0.9rem', margin: 0 }}>
+                Select your preferred video resolution/quality and tap download to save the MP4 file directly to your device storage.
+              </p>
+            </div>
+
+          </div>
+        </div>
+      </section>
+
+      {/* All Articles / Blog Section on Homepage - Perfectly Grid Fitted */}
+      <section className="featured-article-section" style={{ padding: '20px 16px 70px' }}>
+        <div className="container" style={{ maxWidth: '920px' }}>
+          <div style={{ textAlign: 'center', marginBottom: '36px' }}>
+            <div className="eyebrow" style={{ background: 'rgba(255, 8, 68, 0.08)', color: '#ff0844', border: '1px solid rgba(255, 8, 68, 0.15)' }}>
+              FROM THE BLOG
+            </div>
+            <h2 className="howto-main-title">Guides & Articles</h2>
+            <p className="howto-subtitle">Everything you need to know about video streaming and formats.</p>
+          </div>
+
+          {/* Grid layout ensuring all posts display neatly side-by-side */}
+          <div className="post-list" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '24px' }}>
+            {allPosts.map((post, index) => {
+              const gradients = [
+                "linear-gradient(135deg, #ff0844 0%, #ff4e50 100%)",
+                "linear-gradient(135deg, #f59e0b 0%, #ea580c 100%)",
+                "linear-gradient(135deg, #3b82f6 0%, #4f46e5 100%)",
+                "linear-gradient(135deg, #10b981 0%, #059669 100%)"
+              ];
+              const cardBg = post.gradient || gradients[index % gradients.length];
+
+              return (
+                <Link 
+                  key={post.slug} 
+                  href={`/blog/${post.slug}`} 
+                  className="post-card"
+                  style={{ 
+                    borderRadius: '24px', 
+                    background: '#ffffff',
+                    border: '1px solid rgba(226, 232, 240, 0.9)',
+                    boxShadow: '0 10px 30px -5px rgba(0, 0, 0, 0.05)',
+                    overflow: 'hidden',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    textDecoration: 'none'
+                  }}
+                >
+                  <div className="post-thumb" style={{ background: cardBg, height: '140px', position: 'relative' }}>
+                    <div className="thumb-visual" style={{ padding: '16px 20px', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                      <div className="thumb-top-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        {post.category ? (
+                          <span className="thumb-tag" style={{ background: 'rgba(255, 255, 255, 0.22)', backdropFilter: 'blur(8px)', border: '1px solid rgba(255, 255, 255, 0.35)', color: '#fff', fontWeight: '800', fontSize: '0.65rem', padding: '4px 10px', borderRadius: '99px', textTransform: 'uppercase' }}>
+                            {post.category}
+                          </span>
+                        ) : <span />}
+                        <div className="thumb-icon-badge" style={{ width: '38px', height: '38px', borderRadius: '10px', background: 'rgba(255, 255, 255, 0.25)', border: '1px solid rgba(255, 255, 255, 0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <span style={{ fontSize: '1.2rem', lineHeight: 1 }}>{post.emoji || '📄'}</span>
+                        </div>
                       </div>
+                      {post.tagline && (
+                        <div className="thumb-heading">
+                          <p className="thumb-title" style={{ fontSize: '0.9rem', color: '#fff', fontWeight: '700', textShadow: '0 2px 4px rgba(0,0,0,0.2)' }}>
+                            {post.tagline}
+                          </p>
+                        </div>
+                      )}
                     </div>
-                    {post.tagline && (
-                      <div className="thumb-heading">
-                        <p className="thumb-title" style={{ fontSize: "0.95rem", color: "#fff", fontWeight: "700", textShadow: "0 2px 6px rgba(0,0,0,0.25)", overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 1, WebkitBoxOrient: "vertical" }}>
-                          {post.tagline}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Card Body Information */}
-                <div className="post-card-body" style={{ padding: "22px 24px 24px", display: "flex", flexDirection: "column", flex: 1 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
-                    <span className="post-date" style={{ fontSize: "0.78rem", fontWeight: "700", color: "#94a3b8", textTransform: "uppercase" }}>
-                      {new Date(post.date).toLocaleDateString("en-US", {
-                        year: "numeric",
-                        month: "short",
-                        day: "numeric",
-                      })}
-                    </span>
-                    {post.readingTime && (
-                      <>
-                        <span style={{ color: "#cbd5e1" }}>•</span>
-                        <span style={{ fontSize: "0.78rem", fontWeight: "700", color: "#94a3b8" }}>{post.readingTime}</span>
-                      </>
-                    )}
                   </div>
 
-                  <h2 style={{ fontSize: "1.15rem", fontWeight: "800", letterSpacing: "-0.01em", color: "var(--text-main)", marginBottom: "10px", lineHeight: "1.35" }}>
-                    {post.title}
-                  </h2>
+                  <div className="post-card-body" style={{ padding: '20px 22px 22px', display: 'flex', flexDirection: 'column', flex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                      <span className="post-date" style={{ fontSize: '0.75rem', fontWeight: '700', color: '#94a3b8', textTransform: 'uppercase' }}>
+                        {new Date(post.date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}
+                      </span>
+                      {post.readingTime && (
+                        <>
+                          <span style={{ color: '#cbd5e1' }}>•</span>
+                          <span style={{ fontSize: '0.75rem', fontWeight: '700', color: '#94a3b8' }}>{post.readingTime}</span>
+                        </>
+                      )}
+                    </div>
 
-                  <p style={{ fontSize: "0.92rem", color: "var(--text-muted)", lineHeight: "1.6", marginBottom: "20px", flex: 1, display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
-                    {post.excerpt}
-                  </p>
+                    <h3 style={{ fontSize: '1.1rem', fontWeight: '800', color: 'var(--text-main)', marginBottom: '8px', lineHeight: '1.35' }}>
+                      {post.title}
+                    </h3>
 
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingTop: "14px", borderTop: "1px solid #f1f5f9" }}>
-                    <span className="post-read-more" style={{ color: "#ff0844", fontWeight: "800", fontSize: "0.88rem", display: "inline-flex", alignItems: "center", gap: "6px" }}>
-                      Read full article 
-                      <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" />
-                      </svg>
-                    </span>
+                    <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', lineHeight: '1.55', marginBottom: '16px', flex: 1, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                      {post.excerpt}
+                    </p>
+
+                    <div style={{ paddingTop: '12px', borderTop: '1px solid #f1f5f9' }}>
+                      <span className="post-read-more" style={{ color: '#ff0844', fontWeight: '800', fontSize: '0.85rem', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                        Read full article →
+                      </span>
+                    </div>
                   </div>
-                </div>
-              </Link>
-            );
-          })}
+                </Link>
+              );
+            })}
+          </div>
         </div>
+      </section>
 
-      </div>
+      {/* FAQ Section */}
+      <section className="faq-section">
+        <div className="container" style={{ maxWidth: '920px' }}>
+          <div style={{ textAlign: 'center', marginBottom: '32px' }}>
+            <div className="eyebrow" style={{ background: 'rgba(255, 8, 68, 0.08)', color: '#ff0844', border: '1px solid rgba(255, 8, 68, 0.15)' }}>
+              HELP CENTER
+            </div>
+            <h2 className="howto-main-title">Frequently Asked Questions</h2>
+            <p className="howto-subtitle">Got questions about downloading from Bilibili? We've got answers.</p>
+          </div>
+
+          <div className="faq-list">
+            <FaqItem
+              question="Is Bili Save completely free to use?"
+              answer="Yes! Bili Save is 100% free with no hidden charges, subscription walls, or download limits."
+            />
+            <FaqItem
+              question="Do I need to install any app or extension?"
+              answer="No installation required. You can download videos directly from your web browser on Android, iPhone, PC, or Mac."
+            />
+            <FaqItem
+              question="Where are the downloaded videos saved?"
+              answer="Videos are saved directly into your device's default 'Downloads' folder automatically."
+            />
+            <FaqItem
+              question="Can I download videos in 1080p or 4K?"
+              answer="Yes, depending on the source quality uploaded on Bilibili, our downloader extracts the highest available HD resolution."
+            />
+          </div>
+        </div>
+      </section>
     </Layout>
   );
 }
 
-export async function getStaticProps() {
-  return { props: { posts: getAllPosts() } };
+function FaqItem({ question, answer }) {
+  const [isOpen, setIsOpen] = useState(false);
+  return (
+    <div className={`faq-item ${isOpen ? 'faq-open' : ''}`}>
+      <button className="faq-question" onClick={() => setIsOpen(!isOpen)}>
+        <span>{question}</span>
+        <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5" style={{ transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s ease' }}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      {isOpen && <div className="faq-answer">{answer}</div>}
+    </div>
+  );
 }
+
+export async function getStaticProps() {
+  const allPosts = getAllPosts();
+  return {
+    props: {
+      allPosts,
+    },
+  };
+                  }
+                  
