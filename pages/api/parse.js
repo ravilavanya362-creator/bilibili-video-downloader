@@ -10,7 +10,7 @@ export default async function handler(req, res) {
     const actorId = 'zhorex~bilibili-scraper';
     const runUrl = `https://api.apify.com/v2/acts/${actorId}/runs?token=${token}`;
 
-    // యాక్టర్ మోడ్‌కి సరిపోయేలా ఇన్పుట్ పెరామీటర్లను పంపుతున్నాం
+    // యాక్టర్ అడిగిన సరైన మోడ్ 'video_detail' ఇక్కడ ఇస్తున్నాం
     const apiResponse = await fetch(runUrl, {
       method: 'POST',
       headers: {
@@ -18,8 +18,7 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         startUrls: [{ url: url }],
-        // కొన్ని యాక్టర్స్‌కి డైరెక్ట్ లింక్ కాకుండా క్వెరీ లేదా మోడ్ అవసరం ఉంటుంది
-        mode: "video", 
+        mode: "video_detail", 
       })
     });
 
