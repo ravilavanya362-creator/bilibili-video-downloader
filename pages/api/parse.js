@@ -7,7 +7,11 @@ export default async function handler(req, res) {
 
   try {
     const token = process.env.APIFY_TOKEN;
-    const runUrl = `https://api.apify.com/v2/acts/apify~bilibili-scraper/runs?token=${token}`;
+    
+    // ఇక్కడ 'YOUR_ACTOR_NAME' బదులుగా మీ Apify యాక్టర్ అసలైన పేరు లేదా ID రాయండి 
+    // (ఉదాహరణకు మీరు Apify లో ఉపయోగిస్తున్న యాక్టర్ పేరు)
+    const actorName = 'YOUR_ACTOR_NAME'; // <--- ఇక్కడ మీ యాక్టర్ పేరు ఇవ్వండి
+    const runUrl = `https://api.apify.com/v2/acts/${actorName}/runs?token=${token}`;
 
     const apiResponse = await fetch(runUrl, {
       method: 'POST',
