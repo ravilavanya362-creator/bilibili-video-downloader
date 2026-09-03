@@ -8,10 +8,12 @@ export default async function handler(req, res) {
   try {
     const token = process.env.APIFY_TOKEN;
     
-    // ఇక్కడ 'YOUR_ACTOR_NAME' బదులుగా మీ Apify యాక్టర్ అసలైన పేరు లేదా ID రాయండి 
-    // (ఉదాహరణకు మీరు Apify లో ఉపయోగిస్తున్న యాక్టర్ పేరు)
-    const actorName = 'YOUR_ACTOR_NAME'; // <--- ఇక్కడ మీ యాక్టర్ పేరు ఇవ్వండి
-    const runUrl = `https://api.apify.com/v2/acts/${actorName}/runs?token=${token}`;
+    // ఇక్కడ మీ Apify యాక్టర్ యొక్క డైరెక్ట్ రన్ ఎండ్-పాయింట్ లింక్ ఇవ్వండి
+    // (ఉదాహరణకు: https://api.apify.com/v2/acts/YOUR_ACTOR_ID_OR_NAME/runs?token=...)
+    // లేదా కింద ఉన్న ఫార్మాట్‌లో మీ యాక్టర్ ఐడిని ఇక్కడ రాయండి:
+    
+    const actorId = 'apify~bilibili-scraper'; // లేదా మీ యాక్టర్ యొక్క యూనిక్యూ ఐడి
+    const runUrl = `https://api.apify.com/v2/acts/${actorId}/runs?token=${token}`;
 
     const apiResponse = await fetch(runUrl, {
       method: 'POST',
