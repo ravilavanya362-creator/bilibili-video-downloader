@@ -24,20 +24,33 @@ export default async function handler(req, res) {
     
     if (runData && runData.data && runData.data.defaultDatasetId) {
       const datasetId = runData.data.defaultDatasetId;
+      const runId = runData.data.id;
       
-      // స్క్రాపర్ రన్ అయి డేటా ఫుల్‌గా లోడ్ కావడానికి 10 సెకండ్లు వెయిట్ చేయడం
-      await new Promise(resolve => setTimeout(resolve, 10000));
+      // స్క్రాపర్ రన్ అయ్యి డేటా వచ్చే వరకు 8 సెకండ్లు వెయిట్ చేద్దాం
+      await new Promise(resolve => setTimeout(resolve, 8000));
 
       const datasetRes = await fetch(`https://api.apify.com/v2/datasets/${datasetId}/items?token=${token}&clean=true`);
       const items = await datasetRes.json();
       
+      // ఒకవేళ డేటా ఖాళీగా వస్తే, అసలు ఆ రన్ స్టేటస్ ఏంటో కూడా రిటర్న్ చేద్దాం
+      if (items.length === 0) {
+        const runStatusRes = await fetch(`https://api.apify.com/v2/actor-runs/${runId}?token=${token}`);
+        const runStatusData = await runStatusRes.json();
+        return.status(200).json({ 
+          success: false, 
+          message: "Scraper finished but returned empty data", 
+          apifyRunStatus: runStatusData.data.status,
+          actorPricingOrError: runStatusData.data 
+        });
+      }
+      
       return res.status(200).json({ success: true, data: items });
     }
 
-    return res.status(200).json({ success: false, error: "Failed to run actor", runData });
+    return res.status(200).json({ success: false, error: "Failed to start actor run", runData });
 
   } catch (error) {
     console.error(error);
-    return res.status(500).json({ error: 'Internal server error' });
+    return res.status(500).json({ error: error.message });
   }
 }
