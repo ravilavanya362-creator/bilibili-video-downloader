@@ -10,13 +10,16 @@ export default async function handler(req, res) {
     const actorId = 'zhorex~bilibili-scraper';
     const runUrl = `https://api.apify.com/v2/acts/${actorId}/runs?token=${token}`;
 
+    // యాక్టర్ మోడ్‌కి సరిపోయేలా ఇన్పుట్ పెరామీటర్లను పంపుతున్నాం
     const apiResponse = await fetch(runUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        startUrls: [{ url: url }]
+        startUrls: [{ url: url }],
+        // కొన్ని యాక్టర్స్‌కి డైరెక్ట్ లింక్ కాకుండా క్వెరీ లేదా మోడ్ అవసరం ఉంటుంది
+        mode: "video", 
       })
     });
 
@@ -26,7 +29,7 @@ export default async function handler(req, res) {
       const datasetId = runData.data.defaultDatasetId;
       const runId = runData.data.id;
       
-      // స్క్రాపర్ రన్ అయ్యి డేటా వచ్చే వరకు 8 సెకండ్లు వెయిట్ చేద్దాం
+      // స్క్రాపర్ రన్ అయ్యి డేటా కలెక్ట్ చేయడానికి 8 సెకండ్లు వెయిట్ చేద్దాం
       await new Promise(resolve => setTimeout(resolve, 8000));
 
       const datasetRes = await fetch(`https://api.apify.com/v2/datasets/${datasetId}/items?token=${token}&clean=true`);
@@ -38,8 +41,8 @@ export default async function handler(req, res) {
         return res.status(200).json({ 
           success: false, 
           message: "Scraper finished but returned empty data", 
-          apifyRunStatus: runStatusData.data.status,
-          actorPricingOrError: runStatusData.data 
+          statusMessage: runStatusData.data.statusMessage || "0 items found",
+          actorRunDetails: runStatusData.data 
         });
       }
       
