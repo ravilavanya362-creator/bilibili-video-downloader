@@ -7,8 +7,6 @@ export default async function handler(req, res) {
 
   try {
     const token = process.env.APIFY_TOKEN;
-    
-    // zhorex/bilibili-scraper యాక్టర్‌ని లింక్‌తో ట్రిగ్గర్ చేయడం
     const actorId = 'zhorex~bilibili-scraper';
     const runUrl = `https://api.apify.com/v2/acts/${actorId}/runs?token=${token}`;
 
@@ -27,8 +25,8 @@ export default async function handler(req, res) {
     if (runData && runData.data && runData.data.defaultDatasetId) {
       const datasetId = runData.data.defaultDatasetId;
       
-      // స్క్రాపింగ్ కంప్లీట్ కావడానికి 6 సెకండ్లు వెయిట్ చేయడం
-      await new Promise(resolve => setTimeout(resolve, 6000));
+      // స్క్రాపర్ రన్ అయి డేటా ఫుల్‌గా లోడ్ కావడానికి 10 సెకండ్లు వెయిట్ చేయడం
+      await new Promise(resolve => setTimeout(resolve, 10000));
 
       const datasetRes = await fetch(`https://api.apify.com/v2/datasets/${datasetId}/items?token=${token}&clean=true`);
       const items = await datasetRes.json();
@@ -36,7 +34,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ success: true, data: items });
     }
 
-    return res.status(200).json({ success: false, error: "Failed to trigger scraper", runData });
+    return res.status(200).json({ success: false, error: "Failed to run actor", runData });
 
   } catch (error) {
     console.error(error);
