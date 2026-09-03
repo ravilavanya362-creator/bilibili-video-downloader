@@ -6,11 +6,10 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Apify Bilibili Video Scraper యాక్టర్‌ను టోకెన్‌తో రన్ చేయడానికి లింక్
-    const actorId = 'INPUT_YOUR_ACTOR_ID'; // లేదా మీరు వాడే యాక్టర్ ఎండ్‌పాయింట్
-    const apifyUrl = `https://api.apify.com/v2/acts/apify~bilibili-scraper/runs?token=apify_api_mBomVDgnM4cKm5oSEYtdrWD3djY8sU2kNRJi`;
+    const token = process.env.APIFY_TOKEN;
+    const runUrl = `https://api.apify.com/v2/acts/apify~bilibili-scraper/runs?token=${token}`;
 
-    const apiResponse = await fetch(apifyUrl, {
+    const apiResponse = await fetch(runUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -22,16 +21,15 @@ export default async function handler(req, res) {
 
     const runData = await apiResponse.json();
     
-    // రన్ అయిన తర్వాత డేటా తెచ్చుకోవడానికి 
     if (runData && runData.data && runData.data.defaultDatasetId) {
       const datasetId = runData.data.defaultDatasetId;
-      const datasetRes = await fetch(`https://api.apify.com/v2/datasets/${datasetId}/items?token=apify_api_mBomVDgnM4cKm5oSEYtdrWD3djY8sU2kNRJi&clean=true`);
+      const datasetRes = await fetch(`https://api.apify.com/v2/datasets/${datasetId}/items?token=${token}&clean=true`);
       const items = await datasetRes.json();
       
       return res.status(200).json({ success: true, data: items });
     }
 
-    return res.status(200).json({ success: true, message: "Scraper started", runData });
+    return res.status(200).json({ success: true, message: "Job started successfully", runData });
 
   } catch (error) {
     console.error(error);
