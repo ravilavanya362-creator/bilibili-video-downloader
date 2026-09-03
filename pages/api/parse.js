@@ -8,34 +8,20 @@ export default async function handler(req, res) {
   try {
     const token = process.env.APIFY_TOKEN;
     
-    // ఇక్కడ మీ Apify యాక్టర్ యొక్క డైరెక్ట్ రన్ ఎండ్-పాయింట్ లింక్ ఇవ్వండి
-    // (ఉదాహరణకు: https://api.apify.com/v2/acts/YOUR_ACTOR_ID_OR_NAME/runs?token=...)
-    // లేదా కింద ఉన్న ఫార్మాట్‌లో మీ యాక్టర్ ఐడిని ఇక్కడ రాయండి:
-    
-    const actorId = 'apify~bilibili-scraper'; // లేదా మీ యాక్టర్ యొక్క యూనిక్యూ ఐడి
-    const runUrl = `https://api.apify.com/v2/acts/${actorId}/runs?token=${token}`;
+    // స్క్రీన్ షాట్‌లో ఉన్న మీ యాక్టర్ రన్ ఐడి ఆధారంగా డైరెక్ట్ డేటాసెట్ ఎండ్‌పాయింట్
+    // (లేదా మీ లేటెస్ట్ రన్ తాలూకు డేటాసెట్ ఐటమ్స్ లింక్)
+    const datasetUrl = `https://api.apify.com/v2/datasets/dMUifVHUdrI6SEKHw/items?token=${token}&clean=true`;
 
-    const apiResponse = await fetch(runUrl, {
-      method: 'POST',
+    const apiResponse = await fetch(datasetUrl, {
+      method: 'GET',
       headers: {
         'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        startUrls: [{ url: url }]
-      })
+      }
     });
 
-    const runData = await apiResponse.json();
+    const items = await apiResponse.json();
     
-    if (runData && runData.data && runData.data.defaultDatasetId) {
-      const datasetId = runData.data.defaultDatasetId;
-      const datasetRes = await fetch(`https://api.apify.com/v2/datasets/${datasetId}/items?token=${token}&clean=true`);
-      const items = await datasetRes.json();
-      
-      return res.status(200).json({ success: true, data: items });
-    }
-
-    return res.status(200).json({ success: true, message: "Job started successfully", runData });
+    return res.status(200).json({ success: true, data: items });
 
   } catch (error) {
     console.error(error);
