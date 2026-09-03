@@ -32,11 +32,10 @@ export default async function handler(req, res) {
       const datasetRes = await fetch(`https://api.apify.com/v2/datasets/${datasetId}/items?token=${token}&clean=true`);
       const items = await datasetRes.json();
       
-      // ఒకవేళ డేటా ఖాళీగా వస్తే, అసలు ఆ రన్ స్టేటస్ ఏంటో కూడా రిటర్న్ చేద్దాం
       if (items.length === 0) {
         const runStatusRes = await fetch(`https://api.apify.com/v2/actor-runs/${runId}?token=${token}`);
         const runStatusData = await runStatusRes.json();
-        return.status(200).json({ 
+        return res.status(200).json({ 
           success: false, 
           message: "Scraper finished but returned empty data", 
           apifyRunStatus: runStatusData.data.status,
