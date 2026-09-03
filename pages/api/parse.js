@@ -8,8 +8,9 @@ export default async function handler(req, res) {
   try {
     const token = process.env.APIFY_TOKEN;
     
-    // 1. యూజర్ ఇచ్చిన లింక్‌తో Bilibili స్క్రాపర్ యాక్టర్‌ని ట్రిగ్గర్ చేయడం
-    const runUrl = `https://api.apify.com/v2/acts/apify~bilibili-scraper/runs?token=${token}`;
+    // zhorex/bilibili-scraper యాక్టర్‌ని లింక్‌తో ట్రిగ్గర్ చేయడం
+    const actorId = 'zhorex~bilibili-scraper';
+    const runUrl = `https://api.apify.com/v2/acts/${actorId}/runs?token=${token}`;
 
     const apiResponse = await fetch(runUrl, {
       method: 'POST',
@@ -23,25 +24,22 @@ export default async function handler(req, res) {
 
     const runData = await apiResponse.json();
     
-    // 2. యాక్టర్ సక్సెస్ ఫుల్‌గా రన్ అయితే, జనరేట్ అయిన defaultDatasetId ను తీసుకోవడం
     if (runData && runData.data && runData.data.defaultDatasetId) {
       const datasetId = runData.data.defaultDatasetId;
       
-      // స్క్రాపింగ్ పూర్తి కావడానికి చిన్న వెయిటింగ్ (కొన్ని సెకన్లు)
-      await new Promise(resolve => setTimeout(resolve, 5000));
+      // స్క్రాపింగ్ కంప్లీట్ కావడానికి 6 సెకండ్లు వెయిట్ చేయడం
+      await new Promise(resolve => setTimeout(resolve, 6000));
 
-      // 3. ఆ డేటాసెట్ నుండి వీడియో వివరాలను ఫెచ్ చేయడం
       const datasetRes = await fetch(`https://api.apify.com/v2/datasets/${datasetId}/items?token=${token}&clean=true`);
       const items = await datasetRes.json();
       
       return res.status(200).json({ success: true, data: items });
     }
 
-    return res.status(400).json({ success: false, error: "Failed to start scraper run", runData });
+    return res.status(200).json({ success: false, error: "Failed to trigger scraper", runData });
 
   } catch (error) {
     console.error(error);
     return res.status(500).json({ error: 'Internal server error' });
   }
 }
-
