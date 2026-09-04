@@ -31,12 +31,13 @@ function runYtDlp(url) {
       "--skip-download",
       "--no-playlist",
       "--no-warnings",
+      "--no-check-certificates",
 
       "--retries",
-      "3",
+      "2",
 
       "--socket-timeout",
-      "20",
+      "15",
 
       "--add-header",
       "Referer: https://www.bilibili.com/",
@@ -50,10 +51,7 @@ function runYtDlp(url) {
       url,
     ];
 
-    const child = spawn(
-      "yt-dlp",
-      args
-    );
+    const child = spawn("yt-dlp", args);
 
     let stdout = "";
     let stderr = "";
@@ -86,11 +84,114 @@ function runYtDlp(url) {
       }
 
       try {
-        const info =
-          JSON.parse(stdout);
+        const info = JSON.parse(stdout);
+
+        const formats = Array.isArray(info.formats)
+          ? info.formats
+          : [];
+
+        /*
+         * Find a single stream containing BOTH
+         * video and audio.
+         */
+        const combinedFormats = formats
+          .filter((format) => {
+            const hasVideo =
+              format.vcodec &&
+              format.vcodec !== "none";
+
+            const hasAudio =
+              format.acodec &&
+              format.acodec !== "none";
+
+            const height =
+              Number(format.height || 0);
+
+            return (
+              format.url &&
+              hasVideo &&
+              hasAudio &&
+              height <= 1080
+            );
+          })
+          .sort((a, b) => {
+            const heightA =
+              Number(a.height || 0);
+
+            const heightB =
+              Number(b.height || 0);
+
+            if (heightA !== heightB) {
+              return heightB - heightA;
+            }
+
+            return (
+              Number(b.tbr || 0) -
+              Number(a.tbr || 0)
+            );
+          });
+
+        const directFormat =
+          combinedFormats.find(
+            (format) =>
+              String(format.ext).toLowerCase() === "mp4"
+          ) ||
+          combinedFormats[0] ||
+          null;
+
+        /*
+         * DIRECT MODE
+         *
+         * Video + audio already together.
+         */
+        if (directFormat) {
+          console.log(
+            "[BiliSave] Combined stream found:",
+            directFormat.format_id
+          );
+
+          return resolve({
+            success: true,
+            mode: "direct",
+
+            title:
+              info.title ||
+              "Bilibili Video",
+
+            thumbnail:
+              info.thumbnail ||
+              "",
+
+            duration:
+              info.duration || 0,
+
+            quality:
+              directFormat.height
+                ? `${directFormat.height}p`
+                : "HD",
+
+            ext:
+              directFormat.ext ||
+              "mp4",
+
+            directUrl:
+              directFormat.url,
+          });
+        }
+
+        /*
+         * FALLBACK MODE
+         *
+         * Video/audio are separate.
+         * /api/download will use yt-dlp + FFmpeg.
+         */
+        console.log(
+          "[BiliSave] Separate streams detected. FFmpeg fallback."
+        );
 
         resolve({
           success: true,
+          mode: "merge",
 
           title:
             info.title ||
@@ -103,9 +204,8 @@ function runYtDlp(url) {
           duration:
             info.duration || 0,
 
-          /*
-           * Download endpoint.
-           */
+          quality: "HD",
+
           downloadUrl:
             `/api/download?url=${encodeURIComponent(
               url
@@ -114,7 +214,7 @@ function runYtDlp(url) {
                 "Bilibili Video"
             )}`,
         });
-      } catch {
+      } catch (error) {
         reject(
           new Error(
             "Bilibili returned an invalid response."
@@ -125,10 +225,7 @@ function runYtDlp(url) {
   });
 }
 
-export default async function handler(
-  req,
-  res
-) {
+export default async function handler(req, res) {
   if (
     req.method !== "POST" &&
     req.method !== "GET"
@@ -168,15 +265,13 @@ export default async function handler(
 
   try {
     console.log(
-      "[BiliSave] Reading video information..."
+      "[BiliSave] Extracting video information..."
     );
 
     const result =
       await runYtDlp(url);
 
-    return res.status(200).json(
-      result
-    );
+    return res.status(200).json(result);
   } catch (error) {
     console.error(
       "[BiliSave] Parse error:",
