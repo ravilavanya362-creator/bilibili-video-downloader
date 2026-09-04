@@ -71,13 +71,16 @@ const handleDownload = async (e) => {
   };
 
   const handlePaste = async () => {
-    try {
-      const text = await navigator.clipboard.readText();
-      if (text) setUrl(text);
-    } catch (err) {
-      console.error('Failed to read clipboard');
+  try {
+    const text = await navigator.clipboard.readText();
+
+    if (text) {
+      setUrl(text.trim());
     }
-  };
+  } catch (error) {
+    console.error("Paste failed:", error);
+  }
+};
 
   return (
     <Layout>
