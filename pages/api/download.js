@@ -159,10 +159,9 @@ export default async function handler(req, res) {
   const fileId = crypto.randomBytes(8).toString("hex");
 
   const outputTemplate = path.join(
-    tempDir,
-    `${fileId}.%(ext)s`
-  );
-
+  tempDir,
+  `${fileId}.%(ext)s`
+);
   let finalFile = null;
 
   try {
