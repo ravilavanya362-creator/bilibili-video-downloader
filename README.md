@@ -62,3 +62,8 @@ This tool is for personal, non-commercial use — downloading videos you
 own or have explicit permission to save. Respect bilibili's Terms of
 Service and the rights of the original content creators; don't use this
 to redistribute copyrighted material.
+
+
+## BiliSave downloader architecture
+
+The Next.js app is intended to run as a Docker web service with `yt-dlp` and FFmpeg installed. `/api/parse` only returns JSON metadata; `/api/download` downloads the original Bilibili URL and streams the resulting MP4. This avoids treating an MP4 response as JSON and avoids Unicode `Content-Disposition` header errors.
