@@ -10,20 +10,47 @@ export default function Home({ allPosts }) {
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
 
-  const handleDownload = async (e) => {
-    e.preventDefault();
-    if (!url.trim()) return;
+const handleDownload = async (e) => {
+  e.preventDefault();
 
-    setLoading(true);
-    setError('');
-    setResult(null);
+  if (!url.trim()) return;
 
-    try {
-      const res = await fetch('/api/parse', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: url.trim() }),
-      });
+  setLoading(true);
+  setError("");
+  setResult(null);
+
+  try {
+    const res = await fetch("/api/parse", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        url: url.trim(),
+      }),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok || data.success === false) {
+      throw new Error(
+        data.error || "Unable to process this video."
+      );
+    }
+
+    setResult({
+      ...data,
+      videoUrl: data.directUrl,
+    });
+
+  } catch (err) {
+    setError(
+      err.message || "Something went wrong."
+    );
+  } finally {
+    setLoading(false);
+  }
+};
 
       const data = await res.json();
       if (!res.ok || data.success === false) {
