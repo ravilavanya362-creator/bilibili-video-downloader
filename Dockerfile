@@ -25,4 +25,4 @@ RUN npm run build
 ENV PORT=10000
 EXPOSE 10000
 
-CMD ["sh", "-c", "next start -p ${PORT:-10000}"]
+CMD ["sh", "-c", "./node_modules/.bin/next start -p ${PORT:-10000}"]
