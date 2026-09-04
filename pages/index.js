@@ -174,31 +174,41 @@ const handlePaste = async () => {
           </p>
 
           <form onSubmit={handleDownload} className="input-card">
-            <div className="input-group">
-              <input
-                type="text"
-                placeholder="Paste Bilibili link here (bilibili.com or b23.tv)..."
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-              />
-              <button
-  type="submit"
-  className="btn-main"
-  disabled={loading}
-  style={{
-    opacity: loading ? 0.8 : 1,
-    cursor: loading ? "wait" : "pointer",
-  }}
->
-  {loading ? (
-    <>
-      ⏳ Preparing Video...
-    </>
-  ) : (
-    "Download Now 🚀"
-  )}
-</button>
-  </form>{loading && (
+
+  <div className="input-group">
+    <input
+      type="text"
+      placeholder="Paste Bilibili link here (bilibili.com or b23.tv)..."
+      value={url}
+      onChange={(e) => setUrl(e.target.value)}
+    />
+
+    <button
+      type="button"
+      onClick={handlePaste}
+      className="paste-btn"
+    >
+      📋 Paste
+    </button>
+  </div>
+
+  <button
+    type="submit"
+    className="btn-main"
+    disabled={loading}
+    style={{
+      opacity: loading ? 0.8 : 1,
+      cursor: loading ? "wait" : "pointer",
+    }}
+  >
+    {loading
+      ? "⏳ Preparing Download..."
+      : "Download Now 🚀"}
+  </button>
+
+</form>
+
+{loading && (
   <div
     style={{
       marginTop: "18px",
@@ -248,16 +258,11 @@ const handlePaste = async () => {
         lineHeight: "1.5",
       }}
     >
-      We're extracting the video and audio and preparing your MP4.
+      We're finding the fastest available download.
       Please don't close this page.
     </p>
   </div>
 )}
-            </div>
-            <button type="submit" className="btn-main" disabled={loading}>
-              {loading ? 'Processing Video...' : 'Download Now 🚀'}
-            </button>
-          </form>
 
           {error && (
             <div style={{ marginTop: '16px', color: '#ff0844', background: '#fff1f2', padding: '12px', borderRadius: '12px', fontSize: '0.9rem', fontWeight: 600 }}>
