@@ -316,7 +316,7 @@ const handlePaste = async () => {
 function FaqItem({ question, answer }) {
   const [isOpen, setIsOpen] = useState(false);
   return (
-    <div className={`faq-item ${isOpen ? 'faq-open' : ''}`}>
+ <div className={`faq-item ${isOpen ? 'faq-open' : ''}`}>
       <button className="faq-question" onClick={() => setIsOpen(!isOpen)}>
         <span>{question}</span>
         <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5" style={{ transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s ease' }}>
