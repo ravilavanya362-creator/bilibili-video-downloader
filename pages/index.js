@@ -47,9 +47,11 @@ const handleDownload = async (e) => {
     setError(
       err.message || "Something went wrong."
     );
+  } finally {
+    setLoading(false);
+  }
+};
 
-
-      
 const handlePaste = async () => {
   try {
     const text = await navigator.clipboard.readText();
@@ -61,19 +63,6 @@ const handlePaste = async () => {
     console.error("Paste failed:", error);
   }
 };
-
-  const handlePaste = async () => {
-  try {
-    const text = await navigator.clipboard.readText();
-
-    if (text) {
-      setUrl(text.trim());
-    }
-  } catch (error) {
-    console.error("Paste failed:", error);
-  }
-};
-
   return (
     <Layout>
       {/* Hero Section */}
