@@ -7,13 +7,37 @@ import crypto from "crypto";
 export const config = {
   api: {
     responseLimit: false,
-    externalResolver: true,
   },
 };
 
+function safeFilename(name) {
+  return String(name || "Bilibili Video")
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, "_")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 100) || "Bilibili Video";
+}
+
+function cleanup(dir, id) {
+  try {
+    const files = fs.readdirSync(dir);
+
+    for (const file of files) {
+      if (file.startsWith(id + ".")) {
+        try {
+          fs.unlinkSync(path.join(dir, file));
+        } catch {}
+      }
+    }
+  } catch {}
+}
+
 export default function handler(req, res) {
   if (req.method !== "GET") {
-    return res.status(405).json({ error: "Method not allowed" });
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({
+      error: "Method not allowed",
+    });
   }
 
   const { url, title } = req.query;
@@ -26,124 +50,129 @@ export default function handler(req, res) {
 
   const id = crypto.randomBytes(8).toString("hex");
   const tempDir = os.tmpdir();
+  const output = path.join(tempDir, `${id}.%(ext)s`);
 
-  // yt-dlp will create:
-  // id.mp4 / id.webm / id.mkv etc.
-  const outputTemplate = path.join(tempDir, `${id}.%(ext)s`);
-
-  const safeTitle =
-    String(title || "Bilibili Video")
-      .replace(/[<>:"/\\|?*\x00-\x1F]/g, "_")
-      .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, 120) || "Bilibili Video";
+  const filename = safeFilename(title);
 
   const args = [
     "--no-warnings",
     "--no-playlist",
 
-    // Better reliability
+    // Reliability
     "--retries", "10",
     "--fragment-retries", "10",
     "--retry-sleep", "2",
 
-    // Bilibili needs HTTPS
-    "--force-ipv4",
+    // Bilibili request headers
+    "--add-header",
+    "Referer: https://www.bilibili.com/",
 
-    // Best video + audio, fallback to single file
-    "-f", "bv*+ba/b",
+    "--add-header",
+    "Origin: https://www.bilibili.com",
 
-    // Always try to create MP4
-    "--merge-output-format", "mp4",
+    "--add-header",
+    "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36",
 
-    // Output
-    "-o", outputTemplate,
+    // Best available MP4
+    "-f",
+    "bv*[ext=mp4]+ba[ext=m4a]/bv*+ba/b[ext=mp4]/b",
+
+    // Merge into MP4
+    "--merge-output-format",
+    "mp4",
+
+    "-o",
+    output,
 
     url,
   ];
 
-  console.log("Starting yt-dlp:", url);
+  console.log("BiliSave download:", url);
 
-  const ytdlp = spawn("yt-dlp", args);
+  const process = spawn("yt-dlp", args);
 
   let stderr = "";
-  let finished = false;
+  let stdout = "";
 
-  ytdlp.stderr.on("data", (data) => {
+  process.stdout.on("data", (data) => {
     const text = data.toString();
-    stderr += text;
-
-    // Keep Render logs useful without flooding them
+    stdout += text;
     console.log("[yt-dlp]", text.trim());
   });
 
-  ytdlp.stdout.on("data", (data) => {
-    console.log("[yt-dlp]", data.toString().trim());
+  process.stderr.on("data", (data) => {
+    const text = data.toString();
+
+    stderr += text;
+
+    if (stderr.length > 10000) {
+      stderr = stderr.slice(-10000);
+    }
+
+    console.log("[yt-dlp]", text.trim());
   });
 
-  ytdlp.on("error", (error) => {
-    console.error("yt-dlp start error:", error);
+  process.on("error", (error) => {
+    console.error("yt-dlp error:", error);
+
+    cleanup(tempDir, id);
 
     if (!res.headersSent) {
       res.status(500).json({
-        error: "Could not start downloader.",
+        error: "Downloader could not start.",
         details: error.message,
       });
     }
   });
 
-  ytdlp.on("close", (code) => {
-    if (finished) return;
-    finished = true;
-
+  process.on("close", (code) => {
     if (code !== 0) {
-      console.error("yt-dlp failed:", stderr);
+      console.error("yt-dlp failed:");
+      console.error(stderr);
+
+      cleanup(tempDir, id);
 
       if (!res.headersSent) {
         res.status(500).json({
           error: "Bilibili download failed.",
-          details: stderr.slice(-1000),
+          details: stderr.slice(-1500),
         });
       }
 
-      cleanupFiles(tempDir, id);
       return;
     }
 
-    /*
-     * Do NOT assume the output is always id.mp4.
-     * Find the actual file created by yt-dlp.
-     */
-    let files = [];
+    let downloadedFile = null;
 
     try {
-      files = fs
-        .readdirSync(tempDir)
-        .filter((file) => file.startsWith(`${id}.`));
+      const files = fs.readdirSync(tempDir);
+
+      const matches = files.filter((file) =>
+        file.startsWith(id + ".")
+      );
+
+      // Prefer MP4
+      downloadedFile =
+        matches.find((file) => file.endsWith(".mp4")) ||
+        matches[0];
     } catch (error) {
-      console.error("Could not read temp directory:", error);
+      console.error("Temp file error:", error);
     }
 
-    if (!files.length) {
-      console.error("No downloaded file found.");
+    if (!downloadedFile) {
+      cleanup(tempDir, id);
 
-      if (!res.headersSent) {
-        res.status(500).json({
-          error: "Downloaded video file was not created.",
-          details: stderr.slice(-1000),
-        });
-      }
-
-      return;
+      return res.status(500).json({
+        error: "Downloaded file was not found.",
+        details: stderr.slice(-1500),
+      });
     }
 
-    // Prefer MP4
-    const mp4 = files.find((file) => file.endsWith(".mp4"));
-    const selectedFile = mp4 || files[0];
-
-    const filePath = path.join(tempDir, selectedFile);
+    const filePath = path.join(tempDir, downloadedFile);
 
     if (!fs.existsSync(filePath)) {
+      cleanup(tempDir, id);
+
       return res.status(500).json({
         error: "Downloaded file does not exist.",
       });
@@ -153,81 +182,65 @@ export default function handler(req, res) {
 
     try {
       stat = fs.statSync(filePath);
-    } catch (error) {
+    } catch {
+      cleanup(tempDir, id);
+
       return res.status(500).json({
-        error: "Could not read downloaded file.",
+        error: "Unable to read downloaded file.",
       });
     }
 
-    const extension = path.extname(filePath).toLowerCase();
-
-    const contentType =
-      extension === ".mp4"
-        ? "video/mp4"
-        : extension === ".webm"
-        ? "video/webm"
-        : "application/octet-stream";
+    console.log(
+      "Download ready:",
+      filePath,
+      "Size:",
+      stat.size
+    );
 
     res.statusCode = 200;
 
-    res.setHeader("Content-Type", contentType);
+    res.setHeader(
+      "Content-Type",
+      "video/mp4"
+    );
+
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename="${safeTitle}.mp4"`
+      `attachment; filename="${filename}.mp4"`
     );
-    res.setHeader("Content-Length", stat.size);
-    res.setHeader("Cache-Control", "no-store");
-    res.setHeader("Accept-Ranges", "bytes");
 
-    console.log("Sending file:", filePath);
-    console.log("File size:", stat.size);
+    res.setHeader(
+      "Content-Length",
+      stat.size
+    );
+
+    res.setHeader(
+      "Cache-Control",
+      "no-store"
+    );
 
     const stream = fs.createReadStream(filePath);
 
     stream.on("error", (error) => {
       console.error("File stream error:", error);
 
-      cleanupFiles(tempDir, id);
+      cleanup(tempDir, id);
 
-      if (!res.headersSent) {
-        res.status(500).json({
-          error: "Could not send video.",
-        });
-      } else {
-        res.destroy();
+      if (!res.destroyed) {
+        res.destroy(error);
       }
     });
 
-    stream.on("close", () => {
-      cleanupFiles(tempDir, id);
-      console.log("Temporary files cleaned:", id);
+    stream.on("end", () => {
+      console.log("Download sent successfully.");
+
+      cleanup(tempDir, id);
     });
 
     res.on("close", () => {
-      if (!res.writableEnded) {
-        stream.destroy();
-        cleanupFiles(tempDir, id);
-      }
+      cleanup(tempDir, id);
     });
 
     stream.pipe(res);
   });
-}
-
-function cleanupFiles(dir, id) {
-  try {
-    const files = fs
-      .readdirSync(dir)
-      .filter((file) => file.startsWith(`${id}.`));
-
-    for (const file of files) {
-      try {
-        fs.unlinkSync(path.join(dir, file));
-      } catch (error) {
-        console.error("Cleanup error:", error.message);
-      }
-    }
-  } catch (error) {
-    console.error("Cleanup directory error:", error.message);
-  }
 }
