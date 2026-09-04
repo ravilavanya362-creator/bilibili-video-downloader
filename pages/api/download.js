@@ -1,4 +1,8 @@
-import { Readable } from "stream";
+import { spawn } from "child_process";
+import fs from "fs";
+import path from "path";
+import os from "os";
+import crypto from "crypto";
 
 export const config = {
   api: {
@@ -7,73 +11,121 @@ export const config = {
   },
 };
 
-function safeFilename(name) {
-  return (
-    String(
-      name || "Bilibili Video"
-    )
-      .replace(
-        /[<>:"/\\|?*\x00-\x1F]/g,
-        "_"
-      )
-      .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, 100) ||
-    "Bilibili Video"
-  );
-}
-
-function isAllowedMediaUrl(value) {
+function isBilibiliUrl(value) {
   try {
     const u = new URL(value);
-
-    if (u.protocol !== "https:") {
-      return false;
-    }
-
-    const host =
-      u.hostname.toLowerCase();
-
-    /*
-     * Bilibili CDN domains.
-     */
+    const host = u.hostname.toLowerCase();
 
     return (
-      host.endsWith(
-        ".bilivideo.com"
-      ) ||
-      host.endsWith(
-        ".bilivideo.cn"
-      ) ||
-      host.endsWith(
-        ".hdslb.com"
-      ) ||
-      host.endsWith(
-        ".akamaized.net"
-      )
+      host === "b23.tv" ||
+      host === "www.b23.tv" ||
+      host === "bilibili.com" ||
+      host === "www.bilibili.com" ||
+      host.endsWith(".bilibili.com")
     );
   } catch {
     return false;
   }
 }
 
-export default async function handler(
-  req,
-  res
-) {
+function safeFilename(name) {
+  return (
+    String(name || "Bilibili Video")
+      .replace(/[<>:"/\\|?*\x00-\x1F]/g, "_")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 100) || "Bilibili Video"
+  );
+}
+
+function runYtDlp(url, outputFile) {
+  return new Promise((resolve, reject) => {
+    const args = [
+      "--no-playlist",
+      "--no-warnings",
+
+      "--retries",
+      "3",
+
+      "--fragment-retries",
+      "3",
+
+      "--socket-timeout",
+      "30",
+
+      "--add-header",
+      "Referer: https://www.bilibili.com/",
+
+      "--add-header",
+      "Origin: https://www.bilibili.com",
+
+      "--add-header",
+      "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36",
+
+      /*
+       * Prefer best video + best audio.
+       * Limit video to 1080p when possible.
+       */
+      "-f",
+      "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
+
+      /*
+       * FFmpeg merges/remuxes into MP4.
+       */
+      "--merge-output-format",
+      "mp4",
+
+      /*
+       * Output file.
+       */
+      "-o",
+      outputFile,
+
+      url,
+    ];
+
+    const child = spawn("yt-dlp", args);
+
+    let stderr = "";
+
+    child.stderr.on("data", (data) => {
+      stderr += data.toString();
+
+      if (stderr.length > 15000) {
+        stderr = stderr.slice(-15000);
+      }
+    });
+
+    child.on("error", (error) => {
+      reject(error);
+    });
+
+    child.on("close", (code) => {
+      if (code !== 0) {
+        reject(
+          new Error(
+            stderr.trim() ||
+              "Could not download this Bilibili video."
+          )
+        );
+        return;
+      }
+
+      resolve();
+    });
+  });
+}
+
+export default async function handler(req, res) {
   if (req.method !== "GET") {
-    res.setHeader(
-      "Allow",
-      "GET"
-    );
+    res.setHeader("Allow", "GET");
 
     return res.status(405).json({
-      error:
-        "Method not allowed",
+      error: "Method not allowed",
     });
   }
 
-  const mediaUrl =
+  const url =
     typeof req.query?.url === "string"
       ? req.query.url.trim()
       : "";
@@ -83,127 +135,92 @@ export default async function handler(
       ? req.query.title
       : "Bilibili Video";
 
-  if (!mediaUrl) {
+  if (!url) {
     return res.status(400).json({
-      error:
-        "Missing video stream URL.",
+      error: "Missing Bilibili URL.",
     });
   }
 
-  if (
-    !isAllowedMediaUrl(mediaUrl)
-  ) {
+  if (!isBilibiliUrl(url)) {
     return res.status(400).json({
-      error:
-        "Invalid Bilibili media URL.",
+      error: "Invalid Bilibili URL.",
     });
   }
 
-  const filename =
-    safeFilename(title);
+  const safeTitle = safeFilename(title);
+
+  /*
+   * Create a unique temporary directory.
+   */
+  const tempDir = await fs.promises.mkdtemp(
+    path.join(os.tmpdir(), "bilisave-")
+  );
+
+  const fileId = crypto.randomBytes(8).toString("hex");
+
+  const outputTemplate = path.join(
+    tempDir,
+    `${fileId}.%(ext)s`
+  );
+
+  let finalFile = null;
 
   try {
     console.log(
-      "[BiliSave] Starting DIRECT CDN stream..."
+      "[BiliSave] Starting yt-dlp + FFmpeg..."
+    );
+
+    await runYtDlp(
+      url,
+      outputTemplate
     );
 
     /*
-     * IMPORTANT:
-     *
-     * No yt-dlp here.
-     * No FFmpeg here.
-     * No temporary file here.
-     *
-     * Bilibili CDN → Render → User
+     * Find generated MP4 file.
      */
+    const files =
+      await fs.promises.readdir(tempDir);
 
-    const headers = {
-      Referer:
-        "https://www.bilibili.com/",
+    const mp4File = files.find((file) =>
+      file.toLowerCase().endsWith(".mp4")
+    );
 
-      Origin:
-        "https://www.bilibili.com",
-
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36",
-    };
-
-    /*
-     * Forward Range requests.
-     * Useful for large files.
-     */
-
-    if (req.headers.range) {
-      headers.Range =
-        req.headers.range;
+    if (!mp4File) {
+      throw new Error(
+        "MP4 file was not created."
+      );
     }
 
-    const upstream =
-      await fetch(mediaUrl, {
-        method: "GET",
-        headers,
-        redirect: "follow",
-      });
+    finalFile = path.join(
+      tempDir,
+      mp4File
+    );
 
-    if (!upstream.ok) {
-      console.error(
-        "[BiliSave] CDN status:",
-        upstream.status
-      );
+    const stat =
+      await fs.promises.stat(finalFile);
 
-      return res.status(502).json({
-        error:
-          "Bilibili stream expired. Please press Download again.",
-      });
-    }
-
-    /*
-     * Preserve 200 / 206 status.
-     */
-
-    res.statusCode =
-      upstream.status;
-
-    const contentType =
-      upstream.headers.get(
-        "content-type"
-      ) || "video/mp4";
-
-    const contentLength =
-      upstream.headers.get(
-        "content-length"
-      );
-
-    const contentRange =
-      upstream.headers.get(
-        "content-range"
-      );
+    res.statusCode = 200;
 
     res.setHeader(
       "Content-Type",
-      contentType.includes("video")
-        ? contentType
-        : "video/mp4"
+      "video/mp4"
     );
 
-    /*
-     * ASCII fallback prevents:
-     *
-     * ERR_INVALID_CHAR
-     *
-     * for Chinese titles.
-     */
+    res.setHeader(
+      "Content-Length",
+      stat.size
+    );
 
     res.setHeader(
       "Content-Disposition",
       `attachment; filename="Bilibili-Video.mp4"; filename*=UTF-8''${encodeURIComponent(
-        filename + ".mp4"
+        safeTitle + ".mp4"
       )}`
     );
 
     res.setHeader(
       "Cache-Control",
-      "no-store"
+      "no-store, no-cache, must-revalidate"
     );
 
     res.setHeader(
@@ -211,60 +228,56 @@ export default async function handler(
       "nosniff"
     );
 
-    if (contentLength) {
-      res.setHeader(
-        "Content-Length",
-        contentLength
-      );
-    }
-
-    if (contentRange) {
-      res.setHeader(
-        "Content-Range",
-        contentRange
-      );
-    }
-
-    res.setHeader(
-      "Accept-Ranges",
-      "bytes"
+    console.log(
+      "[BiliSave] Sending MP4 to user..."
     );
-
-    if (!upstream.body) {
-      return res.end();
-    }
-
-    /*
-     * DIRECT STREAM
-     *
-     * Nothing is saved to Render disk.
-     */
 
     const stream =
-      Readable.fromWeb(
-        upstream.body
+      fs.createReadStream(finalFile);
+
+    /*
+     * If user closes download,
+     * stop reading the file.
+     */
+    res.on("close", () => {
+      stream.destroy();
+    });
+
+    stream.on("error", (error) => {
+      console.error(
+        "[BiliSave] File stream error:",
+        error
       );
 
-    stream.on(
-      "error",
-      (error) => {
-        console.error(
-          "[BiliSave] Stream error:",
-          error
+      if (!res.destroyed) {
+        res.destroy(error);
+      }
+    });
+
+    /*
+     * Delete temporary files after
+     * the response finishes.
+     */
+    stream.on("close", async () => {
+      try {
+        await fs.promises.rm(
+          tempDir,
+          {
+            recursive: true,
+            force: true,
+          }
         );
 
-        if (!res.destroyed) {
-          res.destroy(error);
-        }
+        console.log(
+          "[BiliSave] Temporary files deleted."
+        );
+      } catch (cleanupError) {
+        console.error(
+          "[BiliSave] Cleanup error:",
+          cleanupError
+        );
       }
-    );
-
-    res.on(
-      "close",
-      () => {
-        stream.destroy();
-      }
-    );
+    });
 
     stream.pipe(res);
   } catch (error) {
@@ -273,15 +286,29 @@ export default async function handler(
       error
     );
 
+    /*
+     * Always cleanup on error.
+     */
+    try {
+      await fs.promises.rm(
+        tempDir,
+        {
+          recursive: true,
+          force: true,
+        }
+      );
+    } catch {}
+
     if (!res.headersSent) {
-      return res.status(502).json({
+      return res.status(500).json({
+        success: false,
         error:
-          "Unable to start Bilibili download.",
+          "Could not download this Bilibili video.",
       });
     }
 
     if (!res.destroyed) {
-      res.destroy(error);
+      res.destroy();
     }
   }
 }
