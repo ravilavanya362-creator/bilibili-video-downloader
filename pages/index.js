@@ -13,7 +13,7 @@ export default function Home({ allPosts }) {
 const handleDownload = async (e) => {
   e.preventDefault();
 
-  if (!url.trim()) return;
+  if (loading || !url.trim()) return;
 
   setLoading(true);
   setError("");
@@ -39,9 +39,9 @@ const handleDownload = async (e) => {
     }
 
     setResult({
-  ...data,
-  videoUrl: data.downloadUrl,
-});
+      ...data,
+      videoUrl: data.downloadUrl || data.directUrl,
+    });
 
   } catch (err) {
     setError(
@@ -87,9 +87,78 @@ const handlePaste = async () => {
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
               />
-              <button type="button" onClick={handlePaste} className="paste-btn">
-                📋 Paste
-              </button>
+              <button
+  type="submit"
+  className="btn-main"
+  disabled={loading}
+  style={{
+    opacity: loading ? 0.8 : 1,
+    cursor: loading ? "wait" : "pointer",
+  }}
+>
+  {loading ? (
+    <>
+      ⏳ Preparing Video...
+    </>
+  ) : (
+    "Download Now 🚀"
+  )}
+</button>
+  </form>{loading && (
+  <div
+    style={{
+      marginTop: "18px",
+      padding: "18px 20px",
+      background: "#fff",
+      border: "1px solid #e2e8f0",
+      borderRadius: "14px",
+      textAlign: "left",
+      boxShadow: "0 6px 20px rgba(0,0,0,0.04)",
+    }}
+  >
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "12px",
+        marginBottom: "8px",
+      }}
+    >
+      <div
+        style={{
+          width: "28px",
+          height: "28px",
+          border: "3px solid #e2e8f0",
+          borderTop: "3px solid #ff0844",
+          borderRadius: "50%",
+          animation: "biliSpin 0.8s linear infinite",
+          flexShrink: 0,
+        }}
+      />
+
+      <strong
+        style={{
+          fontSize: "0.95rem",
+          color: "#0f172a",
+        }}
+      >
+        Preparing your video...
+      </strong>
+    </div>
+
+    <p
+      style={{
+        margin: 0,
+        fontSize: "0.82rem",
+        color: "#64748b",
+        lineHeight: "1.5",
+      }}
+    >
+      We're extracting the video and audio and preparing your MP4.
+      Please don't close this page.
+    </p>
+  </div>
+)}
             </div>
             <button type="submit" className="btn-main" disabled={loading}>
               {loading ? 'Processing Video...' : 'Download Now 🚀'}
