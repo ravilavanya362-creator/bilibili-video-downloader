@@ -127,22 +127,26 @@ const handleDownload = async (e) => {
                 <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '6px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {result.title || 'Bilibili Video'}
                 </h3>
-                {result.success && result.videoUrl && (
-                  <a
-                    href={`/api/download?url=${encodeURIComponent(result.videoUrl)}&title=${encodeURIComponent(result.title || 'video')}`}
-                    style={{ display: 'inline-block', background: '#10b981', color: '#fff', padding: '8px 16px', borderRadius: '8px', fontSize: '0.85rem', fontWeight: 750, textDecoration: 'none' }}
-                  >
-                    Download MP4 📥
-                  </a>
-                )}
-                {result.success === false && (
-                  <p style={{ color: '#ff0844', fontSize: '0.85rem', margin: 0 }}>
-                    {result.message || 'Could not process this video.'}
-                  </p>
-                )}
-              </div>
-            </div>
-          )}
+                {result?.success && result?.videoUrl && (
+  <a
+    href={result.videoUrl}
+    target="_blank"
+    rel="noopener noreferrer"
+    download
+    style={{
+      display: "inline-block",
+      background: "#10b981",
+      color: "#fff",
+      padding: "8px 16px",
+      borderRadius: "8px",
+      fontWeight: 750,
+      textDecoration: "none",
+      cursor: "pointer",
+    }}
+  >
+    Download MP4 📥
+  </a>
+)}
 
           <div className="trust-bar">
             <span className="trust-item">⚡ Ultra Fast</span>
