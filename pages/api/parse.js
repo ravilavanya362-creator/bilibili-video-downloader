@@ -1,43 +1,382 @@
-// Uses yt-dlp (installed system-wide in the Docker image) to fetch
-// metadata for a Bilibili video. yt-dlp natively resolves b23.tv short
-// links and handles Bilibili's DASH (split video/audio) streams.
-import { execFile } from 'child_process';
-import { promisify } from 'util';
+import { spawn } from "child_process";
+import fs from "fs";
+import os from "os";
+import path from "path";
+import crypto from "crypto";
 
-const execFileAsync = promisify(execFile);
+export const config = {
+  api: {
+    responseLimit: false,
+  },
+};
 
-export default async function handler(req, res) {
-  const url = req.method === 'POST' ? req.body?.url : req.query.url;
+function safeFilename(name) {
+  return String(name || "Bilibili Video")
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, "_")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 100) || "Bilibili Video";
+}
 
-  if (!url) {
-    return res.status(400).json({ error: 'URL is required' });
+function cleanup(dir, id) {
+  try {
+    const files = fs.readdirSync(dir);
+
+    for (const file of files) {
+      if (file.startsWith(id + ".")) {
+        try {
+          fs.unlinkSync(path.join(dir, file));
+        } catch {}
+      }
+    }
+  } catch {}
+}
+
+export default function handler(req, res) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({
+      error: "Method not allowed",
+    });
   }
 
-  try {
-    const { stdout } = await execFileAsync(
-      'yt-dlp',
-      ['--no-warnings', '--dump-json', '--no-playlist', url],
-      { timeout: 60000, maxBuffer: 1024 * 1024 * 20 }
+  const { url, title } = req.query;
+
+  if (!url || typeof url !== "string") {
+    return res.status(400).json({
+      error: "Missing Bilibili URL",
+    });
+  }
+
+  const id = crypto.randomBytes(8).toString("hex");
+  const tempDir = os.tmpdir();
+
+  const output = path.join(
+    tempDir,
+    `${id}.%(ext)s`
+  );
+
+  const filename = safeFilename(title);
+
+  /*
+   * Encode filename safely for HTTP headers.
+   * This prevents ERR_INVALID_CHAR when the
+   * Bilibili title contains Chinese/Unicode characters.
+   */
+  const encodedFilename = encodeURIComponent(
+    `${filename}.mp4`
+  );
+
+  const args = [
+    "--no-warnings",
+    "--no-playlist",
+
+    /*
+     * SPEED
+     * Download multiple fragments concurrently.
+     */
+    "-N",
+    "8",
+
+    /*
+     * Reliability
+     */
+    "--retries",
+    "10",
+
+    "--fragment-retries",
+    "10",
+
+    "--retry-sleep",
+    "2",
+
+    /*
+     * Bilibili headers
+     */
+    "--add-header",
+    "Referer: https://www.bilibili.com/",
+
+    "--add-header",
+    "Origin: https://www.bilibili.com",
+
+    "--add-header",
+    "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36",
+
+    /*
+     * Best available video + audio.
+     */
+    "-f",
+    "bv*[ext=mp4]+ba[ext=m4a]/bv*+ba/b[ext=mp4]/b",
+
+    /*
+     * Merge video + audio into MP4.
+     */
+    "--merge-output-format",
+    "mp4",
+
+    /*
+     * Temporary output.
+     */
+    "-o",
+    output,
+
+    url,
+  ];
+
+  console.log("=================================");
+  console.log("BiliSave Download Started");
+  console.log("URL:", url);
+  console.log("Speed mode: 8 concurrent fragments");
+  console.log("=================================");
+
+  const process = spawn("yt-dlp", args);
+
+  let stderr = "";
+  let stdout = "";
+
+  process.stdout.on("data", (data) => {
+    const text = data.toString();
+
+    stdout += text;
+
+    console.log(
+      "[yt-dlp]",
+      text.trim()
+    );
+  });
+
+  process.stderr.on("data", (data) => {
+    const text = data.toString();
+
+    stderr += text;
+
+    if (stderr.length > 10000) {
+      stderr = stderr.slice(-10000);
+    }
+
+    console.log(
+      "[yt-dlp]",
+      text.trim()
+    );
+  });
+
+  process.on("error", (error) => {
+    console.error(
+      "yt-dlp start error:",
+      error
     );
 
-    // yt-dlp prints one JSON object per line; take the first (the video).
-    const firstLine = stdout.trim().split('\n')[0];
-    const info = JSON.parse(firstLine);
+    cleanup(tempDir, id);
 
-    return res.status(200).json({
-      success: true,
-      title: info.title || 'Bilibili Video',
-      thumbnail: info.thumbnail || null,
-      duration: info.duration || null,
-      videoUrl: url,
+    if (!res.headersSent) {
+      return res.status(500).json({
+        error: "Downloader could not start.",
+        details: error.message,
+      });
+    }
+  });
+
+  process.on("close", (code) => {
+    /*
+     * yt-dlp failed
+     */
+    if (code !== 0) {
+      console.error(
+        "================================="
+      );
+
+      console.error(
+        "yt-dlp FAILED"
+      );
+
+      console.error(stderr);
+
+      console.error(
+        "================================="
+      );
+
+      cleanup(tempDir, id);
+
+      if (!res.headersSent) {
+        return res.status(500).json({
+          error: "Bilibili download failed.",
+          details: stderr.slice(-1500),
+        });
+      }
+
+      return;
+    }
+
+    /*
+     * Find the actual downloaded file.
+     */
+    let downloadedFile = null;
+
+    try {
+      const files = fs.readdirSync(
+        tempDir
+      );
+
+      const matches = files.filter(
+        (file) =>
+          file.startsWith(id + ".")
+      );
+
+      /*
+       * Prefer MP4 after FFmpeg merge.
+       */
+      downloadedFile =
+        matches.find(
+          (file) =>
+            file.endsWith(".mp4")
+        ) ||
+        matches[0];
+    } catch (error) {
+      console.error(
+        "Temp directory error:",
+        error
+      );
+    }
+
+    /*
+     * File not found.
+     */
+    if (!downloadedFile) {
+      cleanup(tempDir, id);
+
+      return res.status(500).json({
+        error:
+          "Downloaded video file was not found.",
+        details:
+          stderr.slice(-1500),
+      });
+    }
+
+    const filePath = path.join(
+      tempDir,
+      downloadedFile
+    );
+
+    if (!fs.existsSync(filePath)) {
+      cleanup(tempDir, id);
+
+      return res.status(500).json({
+        error:
+          "Downloaded file does not exist.",
+      });
+    }
+
+    let stat;
+
+    try {
+      stat = fs.statSync(filePath);
+    } catch (error) {
+      cleanup(tempDir, id);
+
+      return res.status(500).json({
+        error:
+          "Unable to read downloaded file.",
+      });
+    }
+
+    console.log(
+      "================================="
+    );
+
+    console.log(
+      "Download completed successfully"
+    );
+
+    console.log(
+      "File:",
+      filePath
+    );
+
+    console.log(
+      "Size:",
+      stat.size,
+      "bytes"
+    );
+
+    console.log(
+      "Sending file to user..."
+    );
+
+    console.log(
+      "================================="
+    );
+
+    /*
+     * Response headers
+     *
+     * IMPORTANT:
+     * Do NOT put Chinese/Unicode directly
+     * inside filename="...".
+     *
+     * ASCII fallback:
+     * Bilibili-Video.mp4
+     *
+     * UTF-8 filename:
+     * filename*=UTF-8''...
+     */
+    res.statusCode = 200;
+
+    res.setHeader(
+      "Content-Type",
+      "video/mp4"
+    );
+
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="Bilibili-Video.mp4"; filename*=UTF-8''${encodedFilename}`
+    );
+
+    res.setHeader(
+      "Content-Length",
+      stat.size
+    );
+
+    res.setHeader(
+      "Cache-Control",
+      "no-store"
+    );
+
+    res.setHeader(
+      "Accept-Ranges",
+      "bytes"
+    );
+
+    /*
+     * Send MP4 to browser.
+     */
+    const stream =
+      fs.createReadStream(filePath);
+
+    stream.on("error", (error) => {
+      console.error(
+        "File streaming error:",
+        error
+      );
+
+      cleanup(tempDir, id);
+
+      if (!res.destroyed) {
+        res.destroy(error);
+      }
     });
-  } catch (error) {
-    console.error(error);
-    const stderr = (error.stderr || error.message || '').toString();
-    return res.status(200).json({
-      success: false,
-      message: 'Could not fetch video details. The video may be private, deleted, or region-locked.',
-      details: stderr.slice(0, 500),
+
+    stream.on("end", () => {
+      console.log(
+        "Download sent successfully."
+      );
+
+      cleanup(tempDir, id);
     });
-  }
+
+    res.on("close", () => {
+      cleanup(tempDir, id);
+    });
+
+    stream.pipe(res);
+  });
 }
