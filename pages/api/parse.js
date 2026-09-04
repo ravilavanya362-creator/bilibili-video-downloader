@@ -33,14 +33,24 @@ function cleanup(dir, id) {
 }
 
 export default function handler(req, res) {
-  if (req.method !== "GET") {
-    res.setHeader("Allow", "GET");
-    return res.status(405).json({
-      error: "Method not allowed",
-    });
-  }
+  if (req.method !== "GET" && req.method !== "POST") {
+  res.setHeader("Allow", "GET, POST");
 
-  const { url, title } = req.query;
+  return res.status(405).json({
+    error: "Method not allowed",
+  });
+}
+
+let url;
+let title;
+
+if (req.method === "POST") {
+  url = req.body?.url;
+  title = req.body?.title;
+} else {
+  url = req.query?.url;
+  title = req.query?.title;
+}
 
   if (!url || typeof url !== "string") {
     return res.status(400).json({
