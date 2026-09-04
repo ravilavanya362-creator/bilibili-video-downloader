@@ -124,27 +124,7 @@ const handleDownload = async (e) => {
   }
 };
 
-    const data = await res.json();
-
-    if (!res.ok || data.success === false) {
-      throw new Error(
-        data.error || "Unable to process this video."
-      );
-    }
-
-    setResult({
-      ...data,
-      videoUrl: data.downloadUrl || data.directUrl,
-    });
-
-  } catch (err) {
-    setError(
-      err.message || "Something went wrong."
-    );
-  } finally {
-    setLoading(false);
-  }
-};
+    
 
 const handlePaste = async () => {
   try {
