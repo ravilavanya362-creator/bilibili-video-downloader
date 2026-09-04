@@ -34,6 +34,100 @@ const handleDownload = async (e) => {
 
     if (!res.ok || data.success === false) {
       throw new Error(
+        data.error ||
+          "Unable to process this video."
+      );
+    }
+
+    /*
+     * DIRECT MODE
+     *
+     * Bilibili already has video + audio
+     * in one stream.
+     *
+     * No server download.
+     */
+    if (
+      data.mode === "direct" &&
+      data.directUrl
+    ) {
+      setResult({
+        ...data,
+        videoUrl: data.directUrl,
+      });
+
+      /*
+       * Start download immediately.
+       */
+      const link =
+        document.createElement("a");
+
+      link.href = data.directUrl;
+      link.download =
+        `${data.title || "Bilibili Video"}.mp4`;
+
+      link.target = "_blank";
+      link.rel =
+        "noopener noreferrer";
+
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+
+      return;
+    }
+
+    /*
+     * MERGE MODE
+     *
+     * Video + audio are separate.
+     * Use server-side FFmpeg fallback.
+     */
+    if (
+      data.mode === "merge" &&
+      data.downloadUrl
+    ) {
+      setResult({
+        ...data,
+        videoUrl: data.downloadUrl,
+      });
+
+      /*
+       * Start server download immediately.
+       */
+      const link =
+        document.createElement("a");
+
+      link.href =
+        data.downloadUrl;
+
+      link.download =
+        `${data.title || "Bilibili Video"}.mp4`;
+
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+
+      return;
+    }
+
+    throw new Error(
+      "No downloadable video was found."
+    );
+  } catch (err) {
+    setError(
+      err.message ||
+        "Something went wrong."
+    );
+  } finally {
+    setLoading(false);
+  }
+};
+
+    const data = await res.json();
+
+    if (!res.ok || data.success === false) {
+      throw new Error(
         data.error || "Unable to process this video."
       );
     }
