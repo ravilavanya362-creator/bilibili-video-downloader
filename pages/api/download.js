@@ -34,7 +34,8 @@ function safeFilename(name) {
       .replace(/[<>:"/\\|?*\x00-\x1F]/g, "_")
       .replace(/\s+/g, " ")
       .trim()
-      .slice(0, 100) || "Bilibili Video"
+      .slice(0, 100) ||
+    "Bilibili Video"
   );
 }
 
@@ -45,13 +46,13 @@ function runYtDlp(url, outputFile) {
       "--no-warnings",
 
       "--retries",
-      "3",
+      "2",
 
       "--fragment-retries",
-      "3",
+      "2",
 
       "--socket-timeout",
-      "30",
+      "20",
 
       "--add-header",
       "Referer: https://www.bilibili.com/",
@@ -63,21 +64,24 @@ function runYtDlp(url, outputFile) {
       "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36",
 
       /*
-       * Prefer best video + best audio.
-       * Limit video to 1080p when possible.
+       * Best video up to 1080p +
+       * best available audio.
        */
       "-f",
       "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
 
       /*
-       * FFmpeg merges/remuxes into MP4.
+       * FFmpeg combines the streams.
        */
       "--merge-output-format",
       "mp4",
 
       /*
-       * Output file.
+       * Avoid unnecessary re-encoding.
        */
+      "--postprocessor-args",
+      "Merger+ffmpeg:-c copy",
+
       "-o",
       outputFile,
 
@@ -147,26 +151,31 @@ export default async function handler(req, res) {
     });
   }
 
-  const safeTitle = safeFilename(title);
+  const safeTitle =
+    safeFilename(title);
 
-  /*
-   * Create a unique temporary directory.
-   */
-  const tempDir = await fs.promises.mkdtemp(
-    path.join(os.tmpdir(), "bilisave-")
-  );
+  const tempDir =
+    await fs.promises.mkdtemp(
+      path.join(
+        os.tmpdir(),
+        "bilisave-"
+      )
+    );
 
-  const fileId = crypto.randomBytes(8).toString("hex");
+  const fileId =
+    crypto
+      .randomBytes(8)
+      .toString("hex");
 
-  const outputTemplate = path.join(
-  tempDir,
-  `${fileId}.%(ext)s`
-);
-  let finalFile = null;
+  const outputTemplate =
+    path.join(
+      tempDir,
+      `${fileId}.%(ext)s`
+    );
 
   try {
     console.log(
-      "[BiliSave] Starting yt-dlp + FFmpeg..."
+      "[BiliSave] Starting FFmpeg fallback..."
     );
 
     await runYtDlp(
@@ -174,15 +183,18 @@ export default async function handler(req, res) {
       outputTemplate
     );
 
-    /*
-     * Find generated MP4 file.
-     */
     const files =
-      await fs.promises.readdir(tempDir);
+      await fs.promises.readdir(
+        tempDir
+      );
 
-    const mp4File = files.find((file) =>
-      file.toLowerCase().endsWith(".mp4")
-    );
+    const mp4File =
+      files.find(
+        (file) =>
+          file
+            .toLowerCase()
+            .endsWith(".mp4")
+      );
 
     if (!mp4File) {
       throw new Error(
@@ -190,13 +202,16 @@ export default async function handler(req, res) {
       );
     }
 
-    finalFile = path.join(
-      tempDir,
-      mp4File
-    );
+    const finalFile =
+      path.join(
+        tempDir,
+        mp4File
+      );
 
     const stat =
-      await fs.promises.stat(finalFile);
+      await fs.promises.stat(
+        finalFile
+      );
 
     res.statusCode = 200;
 
@@ -228,53 +243,55 @@ export default async function handler(req, res) {
     );
 
     console.log(
-      "[BiliSave] Sending MP4 to user..."
+      "[BiliSave] Sending MP4..."
     );
 
     const stream =
-      fs.createReadStream(finalFile);
-
-    /*
-     * If user closes download,
-     * stop reading the file.
-     */
-    res.on("close", () => {
-      stream.destroy();
-    });
-
-    stream.on("error", (error) => {
-      console.error(
-        "[BiliSave] File stream error:",
-        error
+      fs.createReadStream(
+        finalFile
       );
 
-      if (!res.destroyed) {
-        res.destroy(error);
-      }
-    });
-
-    /*
-     * Delete temporary files after
-     * the response finishes.
-     */
-    stream.on("close", async () => {
-      try {
-        await fs.promises.rm(
-          tempDir,
-          {
-            recursive: true,
-            force: true,
-          }
-        );
-
-        console.log(
-          "[BiliSave] Temporary files deleted."
-        );
-      } catch (cleanupError) {
+    stream.on(
+      "error",
+      (error) => {
         console.error(
-          "[BiliSave] Cleanup error:",
-          cleanupError
+          "[BiliSave] Stream error:",
+          error
         );
+
+        if (!res.destroyed) {
+          res.destroy(error);
+        }
+      }
+    );
+
+    stream.on(
+      "close",
+      async () => {
+        try {
+          await fs.promises.rm(
+            tempDir,
+            {
+              recursive: true,
+              force: true,
+            }
+          );
+
+          console.log(
+            "[BiliSave] Temporary files deleted."
+          );
+        } catch (error) {
+          console.error(
+            "[BiliSave] Cleanup error:",
+            error
+          );
+        }
+      }
+    );
+
+    res.on("close", () => {
+      if (!stream.destroyed) {
+        stream.destroy();
       }
     });
 
@@ -285,9 +302,6 @@ export default async function handler(req, res) {
       error
     );
 
-    /*
-     * Always cleanup on error.
-     */
     try {
       await fs.promises.rm(
         tempDir,
