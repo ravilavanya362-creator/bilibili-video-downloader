@@ -112,6 +112,7 @@ const handlePaste = async () => {
                   {result.title || 'Bilibili Video'}
                 </h3>
                 {result?.success && result?.videoUrl && (
+  {result?.success && result?.videoUrl && (
   <a
     href={result.videoUrl}
     target="_blank"
@@ -128,7 +129,7 @@ const handlePaste = async () => {
       cursor: "pointer",
     }}
   >
-    Download MP4 📥
+    Download MP4
   </a>
 )}
                   )}
