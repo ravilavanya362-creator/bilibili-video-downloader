@@ -39,9 +39,9 @@ const handleDownload = async (e) => {
     }
 
     setResult({
-      ...data,
-      videoUrl: data.directUrl,
-    });
+  ...data,
+  videoUrl: data.downloadUrl,
+});
 
   } catch (err) {
     setError(
