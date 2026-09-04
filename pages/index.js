@@ -94,7 +94,7 @@ export default function Home({ allPosts }) {
           {result && (
             <div style={{ marginTop: '24px', background: '#fff', padding: '20px', borderRadius: '16px', border: '1px solid #e2e8f0', textAlign: 'left', display: 'flex', gap: '16px', alignItems: 'center' }}>
               {result.thumbnail && (
-                <img src={result.thumbnail} alt="Thumbnail" style={{ width: '120px', height: '75px', objectFit: 'cover', borderRadius: '8px' }} />
+                <img src={`/api/thumbnail?url=${encodeURIComponent(result.thumbnail)}`} alt="Thumbnail" style={{ width: '120px', height: '75px', objectFit: 'cover', borderRadius: '8px' }} />
               )}
               <div style={{ flex: 1, overflow: 'hidden' }}>
                 <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '6px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -319,3 +319,4 @@ export async function getStaticProps() {
   };
                   }
 
+                  
