@@ -47,28 +47,20 @@ const handleDownload = async (e) => {
     setError(
       err.message || "Something went wrong."
     );
-  } finally {
-    setLoading(false);
+
+
+      
+const handlePaste = async () => {
+  try {
+    const text = await navigator.clipboard.readText();
+
+    if (text) {
+      setUrl(text.trim());
+    }
+  } catch (error) {
+    console.error("Paste failed:", error);
   }
 };
-
-      const data = await res.json();
-      if (!res.ok || data.success === false) {
-        throw new Error(data.error || 'Failed to fetch video details.');
-      }
-
-      // Keep the original Bilibili URL. The download endpoint
-      // runs yt-dlp on the original page URL for reliable extraction.
-      setResult({
-        ...data,
-        videoUrl: url.trim(),
-      });
-    } catch (err) {
-      setError(err.message || 'Something went wrong. Please check your link.');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handlePaste = async () => {
   try {
@@ -150,6 +142,10 @@ const handleDownload = async (e) => {
     Download MP4 📥
   </a>
 )}
+                  )}
+              </div>
+            </div>
+          )}
 
           <div className="trust-bar">
             <span className="trust-item">⚡ Ultra Fast</span>
