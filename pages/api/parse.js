@@ -35,9 +35,6 @@ function runYtDlp(url) {
       "--retries",
       "3",
 
-      "--fragment-retries",
-      "3",
-
       "--socket-timeout",
       "20",
 
@@ -53,7 +50,10 @@ function runYtDlp(url) {
       url,
     ];
 
-    const child = spawn("yt-dlp", args);
+    const child = spawn(
+      "yt-dlp",
+      args
+    );
 
     let stdout = "";
     let stderr = "";
@@ -79,123 +79,15 @@ function runYtDlp(url) {
         reject(
           new Error(
             stderr.trim() ||
-              "Could not extract this Bilibili video."
+              "Could not process this Bilibili video."
           )
         );
         return;
       }
 
       try {
-        const info = JSON.parse(stdout);
-
-        const formats = Array.isArray(info.formats)
-          ? info.formats
-          : [];
-
-        /*
-         * IMPORTANT:
-         *
-         * Find ONE format that already contains:
-         *
-         * VIDEO + AUDIO
-         *
-         * This means:
-         *
-         * No FFmpeg
-         * No server-side download
-         * No merge
-         *
-         * Direct download.
-         */
-
-        const progressiveFormats = formats
-          .filter((format) => {
-            const hasVideo =
-              format.vcodec &&
-              format.vcodec !== "none";
-
-            const hasAudio =
-              format.acodec &&
-              format.acodec !== "none";
-
-            return (
-              format.url &&
-              hasVideo &&
-              hasAudio
-            );
-          })
-          .sort((a, b) => {
-            const heightA =
-              Number(a.height || 0);
-
-            const heightB =
-              Number(b.height || 0);
-
-            /*
-             * Prefer highest available quality
-             * up to 1080p.
-             */
-
-            const limitedA =
-              heightA > 1080 ? 0 : heightA;
-
-            const limitedB =
-              heightB > 1080 ? 0 : heightB;
-
-            if (limitedB !== limitedA) {
-              return limitedB - limitedA;
-            }
-
-            return (
-              Number(b.tbr || 0) -
-              Number(a.tbr || 0)
-            );
-          });
-
-        /*
-         * Prefer MP4 progressive stream.
-         */
-
-        const mp4Format =
-          progressiveFormats.find(
-            (format) =>
-              String(format.ext).toLowerCase() ===
-              "mp4"
-          );
-
-        const directFormat =
-          mp4Format ||
-          progressiveFormats[0] ||
-          null;
-
-        if (!directFormat) {
-          return resolve({
-            success: false,
-
-            title:
-              info.title ||
-              "Bilibili Video",
-
-            thumbnail:
-              info.thumbnail ||
-              "",
-
-            duration:
-              info.duration || 0,
-
-            directUrl: null,
-
-            error:
-              "This video does not provide a direct video + audio stream.",
-          });
-        }
-
-        console.log(
-          "[BiliSave] Direct format:",
-          directFormat.format_id,
-          directFormat.ext,
-          directFormat.height
-        );
+        const info =
+          JSON.parse(stdout);
 
         resolve({
           success: true,
@@ -212,25 +104,17 @@ function runYtDlp(url) {
             info.duration || 0,
 
           /*
-           * This is the actual Bilibili CDN URL.
+           * Download endpoint.
            */
-          directUrl:
-            directFormat.url,
-
-          format:
-            directFormat.format_id ||
-            "",
-
-          quality:
-            directFormat.height
-              ? `${directFormat.height}p`
-              : "HD",
-
-          ext:
-            directFormat.ext ||
-            "mp4",
+          downloadUrl:
+            `/api/download?url=${encodeURIComponent(
+              url
+            )}&title=${encodeURIComponent(
+              info.title ||
+                "Bilibili Video"
+            )}`,
         });
-      } catch (error) {
+      } catch {
         reject(
           new Error(
             "Bilibili returned an invalid response."
@@ -241,7 +125,10 @@ function runYtDlp(url) {
   });
 }
 
-export default async function handler(req, res) {
+export default async function handler(
+  req,
+  res
+) {
   if (
     req.method !== "POST" &&
     req.method !== "GET"
@@ -258,8 +145,12 @@ export default async function handler(req, res) {
 
   const url =
     req.method === "POST"
-      ? String(req.body?.url || "").trim()
-      : String(req.query?.url || "").trim();
+      ? String(
+          req.body?.url || ""
+        ).trim()
+      : String(
+          req.query?.url || ""
+        ).trim();
 
   if (!url) {
     return res.status(400).json({
@@ -277,13 +168,15 @@ export default async function handler(req, res) {
 
   try {
     console.log(
-      "[BiliSave] Extracting direct stream..."
+      "[BiliSave] Reading video information..."
     );
 
     const result =
       await runYtDlp(url);
 
-    return res.status(200).json(result);
+    return res.status(200).json(
+      result
+    );
   } catch (error) {
     console.error(
       "[BiliSave] Parse error:",
