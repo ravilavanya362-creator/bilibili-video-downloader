@@ -24,48 +24,47 @@ function isBilibiliUrl(value) {
   }
 }
 
-/*
- * Convert yt-dlp headers into a small JSON object.
- *
- * These headers are needed because Bilibili CDN can reject
- * direct requests with 403 Forbidden.
- */
-function getStreamHeaders(format) {
-  const headers = format?.http_headers || {};
+function getStreamHeaders(format, sourceUrl) {
+  const original = format?.http_headers || {};
+  const headers = {};
 
-  const allowed = {};
-
-  for (const [key, value] of Object.entries(headers)) {
+  for (const [key, value] of Object.entries(original)) {
     const lower = key.toLowerCase();
 
     if (
       lower === "user-agent" ||
       lower === "referer" ||
-      lower === "origin"
+      lower === "origin" ||
+      lower === "accept" ||
+      lower === "accept-language"
     ) {
-      allowed[key] = String(value);
+      headers[key] = String(value);
     }
   }
 
-  /*
-   * Fallback headers if yt-dlp does not provide them.
-   */
-  if (!allowed["User-Agent"]) {
-    allowed["User-Agent"] =
+  const has = (name) =>
+    Object.keys(headers).some(
+      (key) => key.toLowerCase() === name.toLowerCase()
+    );
+
+  if (!has("User-Agent")) {
+    headers["User-Agent"] =
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36";
   }
 
-  if (!allowed["Referer"]) {
-    allowed["Referer"] =
-      "https://www.bilibili.com/";
+  if (!has("Referer")) {
+    headers["Referer"] = sourceUrl;
   }
 
-  if (!allowed["Origin"]) {
-    allowed["Origin"] =
-      "https://www.bilibili.com";
+  if (!has("Origin")) {
+    headers["Origin"] = "https://www.bilibili.com";
   }
 
-  return allowed;
+  if (!has("Accept")) {
+    headers["Accept"] = "*/*";
+  }
+
+  return headers;
 }
 
 function runYtDlp(url) {
@@ -94,7 +93,9 @@ function runYtDlp(url) {
       url,
     ];
 
-    const child = spawn("yt-dlp", args);
+    const child = spawn("yt-dlp", args, {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
 
     let stdout = "";
     let stderr = "";
@@ -106,8 +107,8 @@ function runYtDlp(url) {
     child.stderr.on("data", (data) => {
       stderr += data.toString();
 
-      if (stderr.length > 10000) {
-        stderr = stderr.slice(-10000);
+      if (stderr.length > 12000) {
+        stderr = stderr.slice(-12000);
       }
     });
 
@@ -129,32 +130,11 @@ function runYtDlp(url) {
       try {
         const info = JSON.parse(stdout);
 
-        /*
-         * ==========================================
-         * COMBINED FORMAT
-         * ==========================================
-         */
-        const combinedFormat = (info.formats || [])
-          .filter(
-            (f) =>
-              f.url &&
-              f.vcodec &&
-              f.vcodec !== "none" &&
-              f.acodec &&
-              f.acodec !== "none"
-          )
-          .sort(
-            (a, b) =>
-              (b.height || 0) -
-              (a.height || 0)
-          )[0];
+        const formats = Array.isArray(info.formats)
+          ? info.formats
+          : [];
 
-        /*
-         * ==========================================
-         * VIDEO-ONLY FORMAT
-         * ==========================================
-         */
-        const videoFormat = (info.formats || [])
+        const videoFormats = formats
           .filter(
             (f) =>
               f.url &&
@@ -162,20 +142,23 @@ function runYtDlp(url) {
               f.vcodec !== "none" &&
               (!f.acodec ||
                 f.acodec === "none") &&
-              (f.height || 0) <= 1080
+              (!f.height ||
+                f.height <= 1080)
           )
-          .sort(
-            (a, b) =>
+          .sort((a, b) => {
+            const height =
               (b.height || 0) -
-              (a.height || 0)
-          )[0];
+              (a.height || 0);
 
-        /*
-         * ==========================================
-         * AUDIO-ONLY FORMAT
-         * ==========================================
-         */
-        const audioFormat = (info.formats || [])
+            if (height) return height;
+
+            return (
+              (b.tbr || 0) -
+              (a.tbr || 0)
+            );
+          });
+
+        const audioFormats = formats
           .filter(
             (f) =>
               f.url &&
@@ -188,89 +171,143 @@ function runYtDlp(url) {
             (a, b) =>
               (b.abr || 0) -
               (a.abr || 0)
-          )[0];
+          );
+
+        const combinedFormats = formats
+          .filter(
+            (f) =>
+              f.url &&
+              f.vcodec &&
+              f.vcodec !== "none" &&
+              f.acodec &&
+              f.acodec !== "none"
+          )
+          .sort((a, b) => {
+            const height =
+              (b.height || 0) -
+              (a.height || 0);
+
+            if (height) return height;
+
+            return (
+              (b.tbr || 0) -
+              (a.tbr || 0)
+            );
+          });
+
+        const videoFormat =
+          videoFormats[0] || null;
+
+        const audioFormat =
+          audioFormats[0] || null;
 
         let directUrl = null;
+        let directHeaders = {};
+
         let videoUrl = null;
         let audioUrl = null;
 
-        let directHeaders = {};
         let videoHeaders = {};
         let audioHeaders = {};
 
         /*
-         * Combined stream.
+         * Prefer separate streams.
+         *
+         * yt-dlp is used ONLY HERE.
+         * It will NOT be called again by download.js.
          */
-        if (combinedFormat) {
-          directUrl = combinedFormat.url;
+        if (videoFormat && audioFormat) {
+          videoUrl = videoFormat.url;
+          audioUrl = audioFormat.url;
+
+          videoHeaders =
+            getStreamHeaders(
+              videoFormat,
+              url
+            );
+
+          audioHeaders =
+            getStreamHeaders(
+              audioFormat,
+              url
+            );
+        } else if (combinedFormats[0]) {
+          directUrl =
+            combinedFormats[0].url;
 
           directHeaders =
             getStreamHeaders(
-              combinedFormat
+              combinedFormats[0],
+              url
             );
         } else {
-          /*
-           * Separate streams.
-           */
-          videoUrl =
-            videoFormat?.url || null;
-
-          audioUrl =
-            audioFormat?.url || null;
-
-          if (videoFormat) {
-            videoHeaders =
-              getStreamHeaders(
-                videoFormat
-              );
-          }
-
-          if (audioFormat) {
-            audioHeaders =
-              getStreamHeaders(
-                audioFormat
-              );
-          }
-        }
-
-        if (
-          !directUrl &&
-          (!videoUrl || !audioUrl)
-        ) {
           throw new Error(
             "No downloadable video streams were found."
           );
         }
 
-        /*
-         * ==========================================
-         * DOWNLOAD URL
-         * ==========================================
-         *
-         * IMPORTANT:
-         * Headers are now passed to download.js.
-         *
-         * yt-dlp is NOT executed again.
-         */
+        function estimateSize(format) {
+          if (!format) return 0;
+
+          const known = Number(
+            format.filesize ||
+              format.filesize_approx ||
+              0
+          );
+
+          if (known > 0) {
+            return known;
+          }
+
+          const bitrate = Number(
+            format.tbr || 0
+          );
+
+          const duration = Number(
+            info.duration || 0
+          );
+
+          if (
+            bitrate > 0 &&
+            duration > 0
+          ) {
+            return Math.round(
+              (bitrate * 1000 / 8) *
+                duration
+            );
+          }
+
+          return 0;
+        }
+
+        const videoSize =
+          estimateSize(videoFormat);
+
+        const audioSize =
+          estimateSize(audioFormat);
+
+        const combinedSize =
+          estimateSize(
+            combinedFormats[0]
+          );
+
+        const filesize =
+          videoSize && audioSize
+            ? videoSize + audioSize
+            : combinedSize;
+
         let downloadUrl =
           `/api/download?title=${encodeURIComponent(
             info.title ||
               "Bilibili Video"
+          )}&sourceUrl=${encodeURIComponent(
+            url
           )}`;
 
-        if (directUrl) {
-          downloadUrl +=
-            `&directUrl=${encodeURIComponent(
-              directUrl
-            )}`;
-
-          downloadUrl +=
-            `&directHeaders=${encodeURIComponent(
-              JSON.stringify(
-                directHeaders
-              )
-            )}`;
-        } else {
+        if (
+          videoUrl &&
+          audioUrl
+        ) {
           downloadUrl +=
             `&videoUrl=${encodeURIComponent(
               videoUrl
@@ -294,23 +331,51 @@ function runYtDlp(url) {
                 audioHeaders
               )
             )}`;
+        } else {
+          downloadUrl +=
+            `&directUrl=${encodeURIComponent(
+              directUrl
+            )}`;
+
+          downloadUrl +=
+            `&directHeaders=${encodeURIComponent(
+              JSON.stringify(
+                directHeaders
+              )
+            )}`;
         }
 
         resolve({
           success: true,
+
+          mode:
+            videoUrl && audioUrl
+              ? "merge"
+              : "direct",
 
           title:
             info.title ||
             "Bilibili Video",
 
           thumbnail:
-            info.thumbnail ||
-            "",
+            info.thumbnail || "",
 
           duration:
-            info.duration || 0,
+            Number(
+              info.duration || 0
+            ),
+
+          filesize,
+
+          videoFilesize:
+            videoSize,
+
+          audioFilesize:
+            audioSize,
 
           directUrl,
+
+          directHeaders,
 
           videoUrl,
 
@@ -319,8 +384,6 @@ function runYtDlp(url) {
           videoHeaders,
 
           audioHeaders,
-
-          directHeaders,
 
           downloadUrl,
         });
@@ -345,7 +408,9 @@ export default async function handler(
     );
 
     return res.status(405).json({
-      error: "Method not allowed",
+      success: false,
+      error:
+        "Method not allowed",
     });
   }
 
@@ -360,6 +425,7 @@ export default async function handler(
 
   if (!url) {
     return res.status(400).json({
+      success: false,
       error:
         "Please enter a Bilibili URL.",
     });
@@ -367,6 +433,7 @@ export default async function handler(
 
   if (!isBilibiliUrl(url)) {
     return res.status(400).json({
+      success: false,
       error:
         "Please enter a valid Bilibili or b23.tv URL.",
     });
@@ -380,13 +447,15 @@ export default async function handler(
     const result =
       await runYtDlp(url);
 
-    if (result.directUrl) {
+    if (
+      result.mode === "merge"
+    ) {
       console.log(
-        "[BiliSave] Combined stream found."
+        "[BiliSave] Separate streams found. FFmpeg will merge."
       );
     } else {
       console.log(
-        "[BiliSave] Separate streams found. FFmpeg will merge."
+        "[BiliSave] Combined stream found. Server will proxy it."
       );
     }
 
@@ -406,6 +475,7 @@ export default async function handler(
     return res.status(500).json({
       success: false,
       error:
+        error.message ||
         "Could not process this Bilibili video.",
     });
   }
