@@ -49,7 +49,6 @@ export default async function handler(req, res) {
     const info = JSON.parse(firstLine);
 
     const title = info.title || 'Bilibili Video';
-    const downloadUrl = `/api/download?url=${encodeURIComponent(trimmedUrl)}&title=${encodeURIComponent(title)}`;
 
     return res.status(200).json({
       success: true,
@@ -57,7 +56,6 @@ export default async function handler(req, res) {
       thumbnail: info.thumbnail || null,
       duration: info.duration || null,
       videoUrl: trimmedUrl,
-      downloadUrl,
     });
   } catch (error) {
     console.error('[BiliSave] Parse error:', error);
