@@ -41,28 +41,12 @@ export default function Home({ allPosts }) {
       }
 
       /*
-       * Parse.js should return either:
-       *
-       * mode: "direct"
-       * directUrl: "..."
-       *
-       * OR
-       *
-       * mode: "merge"
-       * downloadUrl: "/api/download?..."
+       * Parse.js returns the real Bilibili video URL directly as
+       * videoUrl - the download button builds its own /api/direct-download
+       * link from this at click time.
        */
 
-      let videoUrl = '';
-
-      if (data.mode === 'direct' && data.directUrl) {
-        videoUrl = data.directUrl;
-      } else if (data.mode === 'merge' && data.downloadUrl) {
-        videoUrl = data.downloadUrl;
-      } else if (data.downloadUrl) {
-        videoUrl = data.downloadUrl;
-      } else if (data.directUrl) {
-        videoUrl = data.directUrl;
-      }
+      const videoUrl = data.videoUrl || '';
 
       if (!videoUrl) {
         throw new Error(
@@ -803,7 +787,7 @@ export default function Home({ allPosts }) {
                   className="post-card"
                   style={{
                     borderRadius: '24px',
-          background: '#ffffff',
+                    background: '#ffffff',
                     border:
                       '1px solid rgba(226, 232, 240, 0.9)',
                     boxShadow:
@@ -814,6 +798,7 @@ export default function Home({ allPosts }) {
                     textDecoration: 'none',
                   }}
                 >
+
                   <div
                     className="post-thumb"
                     style={{
@@ -822,6 +807,7 @@ export default function Home({ allPosts }) {
                       position: 'relative',
                     }}
                   >
+
                     <div
                       className="thumb-visual"
                       style={{
@@ -832,6 +818,7 @@ export default function Home({ allPosts }) {
                         justifyContent: 'space-between',
                       }}
                     >
+
                       <div
                         className="thumb-top-row"
                         style={{
@@ -840,7 +827,9 @@ export default function Home({ allPosts }) {
                           alignItems: 'center',
                         }}
                       >
+
                         {post.category ? (
+
                           <span
                             className="thumb-tag"
                             style={{
@@ -860,9 +849,12 @@ export default function Home({ allPosts }) {
                           >
                             {post.category}
                           </span>
+
                         ) : (
                           <span />
                         )}
+
+
                         <div
                           className="thumb-icon-badge"
                           style={{
@@ -878,6 +870,7 @@ export default function Home({ allPosts }) {
                             justifyContent: 'center',
                           }}
                         >
+
                           <span
                             style={{
                               fontSize: '1.2rem',
@@ -886,10 +879,16 @@ export default function Home({ allPosts }) {
                           >
                             {post.emoji || '📄'}
                           </span>
+
                         </div>
+
                       </div>
+
+
                       {post.tagline && (
+
                         <div className="thumb-heading">
+
                           <p
                             className="thumb-title"
                             style={{
@@ -902,10 +901,16 @@ export default function Home({ allPosts }) {
                           >
                             {post.tagline}
                           </p>
+
                         </div>
+
                       )}
+
                     </div>
+
                   </div>
+
+
                   <div
                     className="post-card-body"
                     style={{
@@ -916,6 +921,7 @@ export default function Home({ allPosts }) {
                       flex: 1,
                     }}
                   >
+
                     <div
                       style={{
                         display: 'flex',
@@ -924,6 +930,7 @@ export default function Home({ allPosts }) {
                         marginBottom: '8px',
                       }}
                     >
+
                       <span
                         className="post-date"
                         style={{
@@ -944,6 +951,8 @@ export default function Home({ allPosts }) {
                           }
                         )}
                       </span>
+
+
                       {post.readingTime && (
                         <>
                           <span
@@ -953,6 +962,7 @@ export default function Home({ allPosts }) {
                           >
                             •
                           </span>
+
                           <span
                             style={{
                               fontSize: '0.75rem',
@@ -964,7 +974,10 @@ export default function Home({ allPosts }) {
                           </span>
                         </>
                       )}
+
                     </div>
+
+
                     <h3
                       style={{
                         fontSize: '1.1rem',
@@ -977,6 +990,8 @@ export default function Home({ allPosts }) {
                     >
                       {post.title}
                     </h3>
+
+
                     <p
                       style={{
                         fontSize: '0.9rem',
@@ -995,6 +1010,8 @@ export default function Home({ allPosts }) {
                     >
                       {post.excerpt}
                     </p>
+
+
                     <div
                       style={{
                         paddingTop: '12px',
@@ -1002,6 +1019,7 @@ export default function Home({ allPosts }) {
                           '1px solid #f1f5f9',
                       }}
                     >
+
                       <span
                         className="post-read-more"
                         style={{
@@ -1015,30 +1033,44 @@ export default function Home({ allPosts }) {
                       >
                         Read full article →
                       </span>
+
                     </div>
+
                   </div>
+
                 </Link>
+
               );
+
             })}
+
           </div>
+
         </div>
+
       </section>
+
+
       {/* =========================
           FAQ SECTION
       ========================== */}
+
       <section className="faq-section">
+
         <div
           className="container"
           style={{
             maxWidth: '920px',
           }}
         >
+
           <div
             style={{
               textAlign: 'center',
               marginBottom: '32px',
             }}
           >
+
             <div
               className="eyebrow"
               style={{
@@ -1051,56 +1083,78 @@ export default function Home({ allPosts }) {
             >
               HELP CENTER
             </div>
+
             <h2 className="howto-main-title">
               Frequently Asked Questions
             </h2>
+
             <p className="howto-subtitle">
               Got questions about downloading
               from Bilibili? We've got answers.
             </p>
+
           </div>
+
+
           <div className="faq-list">
+
             <FaqItem
               question="Is Bili Save completely free to use?"
               answer="Yes! Bili Save is 100% free with no hidden charges, subscription walls, or download limits."
             />
+
             <FaqItem
               question="Do I need to install any app or extension?"
               answer="No installation required. You can download videos directly from your web browser on Android, iPhone, PC, or Mac."
             />
+
             <FaqItem
               question="Where are the downloaded videos saved?"
               answer="Videos are saved directly into your device's default Downloads folder automatically."
             />
+
             <FaqItem
               question="Can I download videos in 1080p or 4K?"
               answer="Yes, depending on the source quality uploaded on Bilibili, the downloader extracts the highest available HD resolution."
             />
+
           </div>
+
         </div>
+
       </section>
+
     </Layout>
   );
 }
+
+
 /* =========================
    FAQ ITEM
 ========================= */
+
 function FaqItem({ question, answer }) {
+
   const [isOpen, setIsOpen] =
     useState(false);
+
   return (
+
     <div
       className={`faq-item ${
         isOpen ? 'faq-open' : ''
       }`}
     >
+
       <button
         className="faq-question"
         onClick={() =>
           setIsOpen(!isOpen)
         }
       >
+
         <span>{question}</span>
+
         <svg
           width="20"
           height="20"
@@ -1116,6 +1170,7 @@ function FaqItem({ question, answer }) {
               'transform 0.2s ease',
           }}
         >
+
           <path
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -1123,24 +1178,36 @@ function FaqItem({ question, answer }) {
           />
 
         </svg>
+
       </button>
+
+
       {isOpen && (
+
         <div className="faq-answer">
           {answer}
         </div>
+
       )}
+
     </div>
+
   );
 }
+
+
 /* =========================
    STATIC PROPS
 ========================= */
+
 export async function getStaticProps() {
+
   const allPosts =
     getAllPosts();
+
   return {
     props: {
       allPosts,
     },
   };
-                          }
+}
