@@ -81,26 +81,62 @@ export default function Home({ allPosts }) {
   };
 
   /*
-   * Download button handler - streams directly from our server (which
-   * pipes ffmpeg's live output straight through) so the browser's own
-   * download starts immediately on click, like a normal file download.
+   * Download button handler - uses a background job + polling flow.
+   * yt-dlp downloads+merges to a complete file first (with its own retry
+   * logic for network hiccups), then we stream that finished file. This
+   * is what reliably downloaded full, correct videos in testing - the
+   * direct ffmpeg-streaming approach was truncating longer videos.
    */
-  const handleVideoDownload = () => {
+  const handleVideoDownload = async () => {
     if (!result?.videoUrl) return;
 
     setDownloadPreparing(true);
+    setDownloadProgress(0);
     setError('');
 
-    const link = document.createElement('a');
-    link.href = `/api/direct-download?url=${encodeURIComponent(result.videoUrl)}&title=${encodeURIComponent(result.title || 'Bilibili Video')}`;
-    link.download = `${result.title || 'Bilibili Video'}.mp4`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
+    try {
+      const startRes = await fetch('/api/start-download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: result.videoUrl, title: result.title || 'Bilibili Video' }),
+      });
+      const startData = await startRes.json();
+      if (!startRes.ok || !startData.jobId) {
+        throw new Error(startData.error || 'Could not start download.');
+      }
 
-    // Browser takes over from here; just clear our own "starting" message
-    // after a few seconds since we can't track native download progress.
-    setTimeout(() => setDownloadPreparing(false), 6000);
+      const jobId = startData.jobId;
+
+      // Poll every 2s until the job is done or errors out (up to ~5 min).
+      const maxAttempts = 150;
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        const statusRes = await fetch(`/api/job-status?id=${jobId}`);
+        const statusData = await statusRes.json();
+        setDownloadProgress(statusData.progress || 0);
+
+        if (statusData.status === 'done') {
+          const link = document.createElement('a');
+          link.href = `/api/job-file?id=${jobId}`;
+          link.download = `${result.title || 'Bilibili Video'}.mp4`;
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          setDownloadPreparing(false);
+          return;
+        }
+
+        if (statusData.status === 'error') {
+          throw new Error(statusData.message || 'Download failed.');
+        }
+        // status === 'processing' or 'merging' -> keep polling
+      }
+
+      throw new Error('Download is taking too long. Please try again.');
+    } catch (err) {
+      setError(err.message || 'Something went wrong while downloading.');
+      setDownloadPreparing(false);
+    }
   };
 
   /*
@@ -586,7 +622,7 @@ export default function Home({ allPosts }) {
 
               <h3
                 className="howto-step-title"
-                style={{
+style={{
                   fontSize: '1.15rem',
                   marginBottom: '8px',
                 }}
@@ -1210,4 +1246,4 @@ export async function getStaticProps() {
       allPosts,
     },
   };
-}
+                }
