@@ -1,8 +1,10 @@
-import { spawn } from "child_process";
 import fs from "fs";
 import os from "os";
 import path from "path";
 import crypto from "crypto";
+import { spawn } from "child_process";
+import { Readable } from "stream";
+import { pipeline } from "stream/promises";
 
 export const config = {
   api: {
@@ -20,184 +22,386 @@ function safeFilename(name) {
         /[<>:"/\\|?*\x00-\x1F]/g,
         "_"
       )
-      .replace(/\s+/g, " ")
+      .replace(
+        /\s+/g,
+        " "
+      )
       .trim()
       .slice(0, 100) ||
     "Bilibili Video"
   );
 }
 
-/*
- * Convert header object into FFmpeg format.
- */
-function headersToFFmpeg(headers) {
+function parseHeaders(value) {
   if (
-    !headers ||
-    typeof headers !== "object"
+    typeof value !== "string" ||
+    !value
   ) {
-    return "";
+    return {};
   }
 
-  return Object.entries(headers)
-    .map(
-      ([key, value]) =>
-        `${key}: ${String(value)}`
-    )
-    .join("\r\n") + "\r\n";
+  try {
+    const parsed =
+      JSON.parse(value);
+
+    return parsed &&
+      typeof parsed === "object"
+      ? parsed
+      : {};
+  } catch {
+    return {};
+  }
 }
 
-/*
- * Run FFmpeg.
- *
- * IMPORTANT:
- * - yt-dlp is NOT used here.
- * - Video is NOT re-encoded.
- * - Audio is NOT re-encoded.
- * - FFmpeg only muxes the streams.
- */
-function runFFmpegToFile(
+function normaliseHeaders(
+  headers,
+  sourceUrl
+) {
+  const output = {};
+
+  for (const [
+    key,
+    value,
+  ] of Object.entries(
+    headers || {}
+  )) {
+    const lower =
+      key.toLowerCase();
+
+    if (
+      lower === "user-agent" ||
+      lower === "referer" ||
+      lower === "origin" ||
+      lower === "accept" ||
+      lower ===
+        "accept-language"
+    ) {
+      output[key] =
+        String(value);
+    }
+  }
+
+  const has = (name) =>
+    Object.keys(
+      output
+    ).some(
+      (key) =>
+        key.toLowerCase() ===
+        name.toLowerCase()
+    );
+
+  if (!has("User-Agent")) {
+    output["User-Agent"] =
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36";
+  }
+
+  if (!has("Referer")) {
+    output["Referer"] =
+      sourceUrl ||
+      "https://www.bilibili.com/";
+  }
+
+  if (!has("Origin")) {
+    output["Origin"] =
+      "https://www.bilibili.com";
+  }
+
+  if (!has("Accept")) {
+    output["Accept"] = "*/*";
+  }
+
+  return output;
+}
+
+async function openUpstream(
+  url,
+  headers,
+  label
+) {
+  const requestHeaders =
+    normaliseHeaders(
+      headers,
+      headers?.Referer
+    );
+
+  /*
+   * Do not request gzip/br.
+   * FFmpeg receives the real media bytes.
+   */
+  requestHeaders[
+    "Accept-Encoding"
+  ] = "identity";
+
+  const response =
+    await fetch(url, {
+      method: "GET",
+      headers:
+        requestHeaders,
+      redirect: "follow",
+    });
+
+  if (
+    !response.ok ||
+    !response.body
+  ) {
+    let detail = "";
+
+    try {
+      detail =
+        await response.text();
+    } catch {}
+
+    throw new Error(
+      `${label} CDN request failed (${response.status} ${response.statusText})${
+        detail
+          ? `: ${detail.slice(
+              0,
+              180
+            )}`
+          : ""
+      }`
+    );
+  }
+
+  console.log(
+    `[BiliSave] ${label} CDN connected: ${response.status}${
+      response.headers.get(
+        "content-length"
+      )
+        ? `, ${response.headers.get(
+            "content-length"
+          )} bytes`
+        : ""
+    }`
+  );
+
+  return response;
+}
+
+async function runFFmpegToFile(
   videoUrl,
   audioUrl,
   videoHeaders,
   audioHeaders,
+  sourceUrl,
   outputFile
 ) {
-  return new Promise(
-    (resolve, reject) => {
-      const videoHeaderText =
-        headersToFFmpeg(
-          videoHeaders
-        );
+  /*
+   * Connect to Bilibili CDN first.
+   */
+  const videoResponse =
+    await openUpstream(
+      videoUrl,
+      {
+        ...videoHeaders,
+        Referer:
+          videoHeaders?.Referer ||
+          sourceUrl,
+      },
+      "Video"
+    );
 
-      const audioHeaderText =
-        headersToFFmpeg(
-          audioHeaders
-        );
+  const audioResponse =
+    await openUpstream(
+      audioUrl,
+      {
+        ...audioHeaders,
+        Referer:
+          audioHeaders?.Referer ||
+          sourceUrl,
+      },
+      "Audio"
+    );
 
-      const args = [
-        "-hide_banner",
-        "-loglevel",
-        "error",
+  const args = [
+    "-hide_banner",
+    "-loglevel",
+    "error",
 
-        /*
-         * VIDEO
-         */
-        "-headers",
-        videoHeaderText,
+    "-i",
+    "pipe:3",
 
-        "-i",
-        videoUrl,
+    "-i",
+    "pipe:4",
 
-        /*
-         * AUDIO
-         */
-        "-headers",
-        audioHeaderText,
+    "-map",
+    "0:v:0",
 
-        "-i",
-        audioUrl,
+    "-map",
+    "1:a:0",
 
-        /*
-         * Map video + audio.
-         */
-        "-map",
-        "0:v:0",
+    /*
+     * No re-encoding.
+     */
+    "-c:v",
+    "copy",
 
-        "-map",
-        "1:a:0",
+    "-c:a",
+    "copy",
 
-        /*
-         * STREAM COPY.
-         *
-         * No re-encoding.
-         */
-        "-c:v",
-        "copy",
+    /*
+     * Finalize MP4 metadata/index.
+     */
+    "-movflags",
+    "+faststart",
 
-        "-c:a",
-        "copy",
+    "-f",
+    "mp4",
 
-        /*
-         * Proper MP4 metadata placement.
-         */
-        "-movflags",
-        "+faststart",
+    outputFile,
+  ];
 
-        /*
-         * MP4 output.
-         */
-        "-f",
-        "mp4",
+  console.log(
+    "[BiliSave] FFmpeg stream-copy started..."
+  );
 
-        outputFile,
-      ];
+  const child =
+    spawn(
+      "ffmpeg",
+      args,
+      {
+        stdio: [
+          "ignore",
+          "ignore",
+          "pipe",
+          "pipe",
+          "pipe",
+        ],
+      }
+    );
 
-      console.log(
-        "[BiliSave] FFmpeg stream-copy started..."
-      );
+  let stderr = "";
 
-      const child =
-        spawn(
-          "ffmpeg",
-          args,
-          {
-            stdio: [
-              "ignore",
-              "ignore",
-              "pipe",
-            ],
-          }
-        );
+  child.stderr.on(
+    "data",
+    (data) => {
+      stderr +=
+        data.toString();
 
-      let stderr = "";
-
-      child.stderr.on(
-        "data",
-        (data) => {
-          stderr +=
-            data.toString();
-
-          if (
-            stderr.length >
-            12000
-          ) {
-            stderr =
-              stderr.slice(
-                -12000
-              );
-          }
-        }
-      );
-
-      child.on(
-        "error",
-        (error) => {
-          reject(error);
-        }
-      );
-
-      child.on(
-        "close",
-        (code) => {
-          if (code !== 0) {
-            reject(
-              new Error(
-                stderr.trim() ||
-                  "FFmpeg could not create the MP4."
-              )
-            );
-
-            return;
-          }
-
-          console.log(
-            "[BiliSave] FFmpeg MP4 finalized successfully."
+      if (
+        stderr.length >
+        12000
+      ) {
+        stderr =
+          stderr.slice(
+            -12000
           );
-
-          resolve();
-        }
-      );
+      }
     }
+  );
+
+  const videoInput =
+    Readable.fromWeb(
+      videoResponse.body
+    );
+
+  const audioInput =
+    Readable.fromWeb(
+      audioResponse.body
+    );
+
+  const pumpVideo =
+    pipeline(
+      videoInput,
+      child.stdio[3]
+    );
+
+  const pumpAudio =
+    pipeline(
+      audioInput,
+      child.stdio[4]
+    );
+
+  const processExit =
+    new Promise(
+      (resolve, reject) => {
+        child.on(
+          "error",
+          reject
+        );
+
+        child.on(
+          "close",
+          (
+            code,
+            signal
+          ) => {
+            resolve({
+              code,
+              signal,
+            });
+          }
+        );
+      }
+    );
+
+  const result =
+    await processExit;
+
+  const pumpResults =
+    await Promise.allSettled(
+      [
+        pumpVideo,
+        pumpAudio,
+      ]
+    );
+
+  if (
+    result.code !== 0
+  ) {
+    const pumpError =
+      pumpResults.find(
+        (x) =>
+          x.status ===
+          "rejected"
+      )?.reason;
+
+    throw new Error(
+      stderr.trim() ||
+        pumpError?.message ||
+        `FFmpeg exited with code ${result.code}.`
+    );
+  }
+
+  console.log(
+    "[BiliSave] FFmpeg MP4 finalized successfully."
+  );
+}
+
+async function downloadDirectToFile(
+  url,
+  headers,
+  sourceUrl,
+  outputFile
+) {
+  const response =
+    await openUpstream(
+      url,
+      {
+        ...headers,
+        Referer:
+          headers?.Referer ||
+          sourceUrl,
+      },
+      "Video"
+    );
+
+  if (!response.body) {
+    throw new Error(
+      "CDN returned an empty video body."
+    );
+  }
+
+  const temp =
+    fs.createWriteStream(
+      outputFile
+    );
+
+  await pipeline(
+    Readable.fromWeb(
+      response.body
+    ),
+    temp
   );
 }
 
@@ -205,7 +409,9 @@ export default async function handler(
   req,
   res
 ) {
-  if (req.method !== "GET") {
+  if (
+    req.method !== "GET"
+  ) {
     res.setHeader(
       "Allow",
       "GET"
@@ -218,122 +424,61 @@ export default async function handler(
     });
   }
 
+  const query =
+    req.query || {};
+
   const title =
-    typeof req.query?.title ===
+    typeof query.title ===
     "string"
-      ? req.query.title
+      ? query.title
       : "Bilibili Video";
 
   const safeTitle =
     safeFilename(title);
 
-  /*
-   * ==========================================
-   * DIRECT DOWNLOAD
-   * ==========================================
-   */
+  const sourceUrl =
+    typeof query.sourceUrl ===
+    "string"
+      ? query.sourceUrl
+      : "https://www.bilibili.com/";
+
   const directUrl =
-    typeof req.query
-      ?.directUrl === "string"
-      ? req.query.directUrl
+    typeof query.directUrl ===
+    "string"
+      ? query.directUrl
       : "";
 
-  let directHeaders = {};
-
-  try {
-    if (
-      typeof req.query
-        ?.directHeaders ===
-      "string"
-    ) {
-      directHeaders =
-        JSON.parse(
-          req.query.directHeaders
-        );
-    }
-  } catch {
-    directHeaders = {};
-  }
-
-  /*
-   * ==========================================
-   * SEPARATE STREAMS
-   * ==========================================
-   */
   const videoUrl =
-    typeof req.query
-      ?.videoUrl === "string"
-      ? req.query.videoUrl
+    typeof query.videoUrl ===
+    "string"
+      ? query.videoUrl
       : "";
 
   const audioUrl =
-    typeof req.query
-      ?.audioUrl === "string"
-      ? req.query.audioUrl
+    typeof query.audioUrl ===
+    "string"
+      ? query.audioUrl
       : "";
 
-  let videoHeaders = {};
-  let audioHeaders = {};
-
-  try {
-    if (
-      typeof req.query
-        ?.videoHeaders ===
-      "string"
-    ) {
-      videoHeaders =
-        JSON.parse(
-          req.query.videoHeaders
-        );
-    }
-
-    if (
-      typeof req.query
-        ?.audioHeaders ===
-      "string"
-    ) {
-      audioHeaders =
-        JSON.parse(
-          req.query.audioHeaders
-        );
-    }
-  } catch {
-    videoHeaders = {};
-    audioHeaders = {};
-  }
-
-  /*
-   * ==========================================
-   * CASE 1: DIRECT STREAM
-   * ==========================================
-   */
-  if (directUrl) {
-    console.log(
-      "[BiliSave] Direct CDN download..."
+  const directHeaders =
+    parseHeaders(
+      query.directHeaders
     );
 
-    /*
-     * Direct browser redirect may still
-     * be blocked by CDN because browser
-     * cannot attach custom headers.
-     *
-     * Therefore return a clear response.
-     */
-    return res.status(400).json({
-      success: false,
-      error:
-        "Direct stream requires server download.",
-    });
-  }
+  const videoHeaders =
+    parseHeaders(
+      query.videoHeaders
+    );
 
-  /*
-   * ==========================================
-   * CASE 2: VIDEO + AUDIO
-   * ==========================================
-   */
+  const audioHeaders =
+    parseHeaders(
+      query.audioHeaders
+    );
+
   if (
-    !videoUrl ||
-    !audioUrl
+    !directUrl &&
+    (!videoUrl ||
+      !audioUrl)
   ) {
     return res.status(400).json({
       success: false,
@@ -345,37 +490,54 @@ export default async function handler(
   let tempFile = null;
 
   try {
-    console.log(
-      "[BiliSave] Separate streams detected."
-    );
-
-    /*
-     * Unique temporary MP4.
-     */
     const randomId =
       crypto
         .randomBytes(12)
         .toString("hex");
 
-    tempFile =
-      path.join(
-        os.tmpdir(),
-        `bili-${randomId}.mp4`
-      );
-
-    /*
-     * FFmpeg creates COMPLETE MP4.
-     */
-    await runFFmpegToFile(
-      videoUrl,
-      audioUrl,
-      videoHeaders,
-      audioHeaders,
-      tempFile
+    tempFile = path.join(
+      os.tmpdir(),
+      `bili-${randomId}.mp4`
     );
 
     /*
-     * Verify output.
+     * CASE 1:
+     * Combined stream.
+     */
+    if (directUrl) {
+      console.log(
+        "[BiliSave] Combined stream found. Downloading once through server..."
+      );
+
+      await downloadDirectToFile(
+        directUrl,
+        directHeaders,
+        sourceUrl,
+        tempFile
+      );
+    }
+
+    /*
+     * CASE 2:
+     * Separate video + audio.
+     */
+    else {
+      console.log(
+        "[BiliSave] Separate streams detected."
+      );
+
+      await runFFmpegToFile(
+        videoUrl,
+        audioUrl,
+        videoHeaders,
+        audioHeaders,
+        sourceUrl,
+        tempFile
+      );
+    }
+
+    /*
+     * Make sure complete MP4 exists.
      */
     if (
       !fs.existsSync(
@@ -383,7 +545,7 @@ export default async function handler(
       )
     ) {
       throw new Error(
-        "FFmpeg output file was not created."
+        "MP4 output file was not created."
       );
     }
 
@@ -392,7 +554,9 @@ export default async function handler(
         tempFile
       );
 
-    if (stat.size < 1024) {
+    if (
+      stat.size < 1024
+    ) {
       throw new Error(
         "Generated MP4 is empty or invalid."
       );
@@ -403,8 +567,7 @@ export default async function handler(
     );
 
     /*
-     * Browser receives ONLY AFTER
-     * FFmpeg has finished.
+     * Browser download headers.
      */
     res.statusCode = 200;
 
@@ -421,7 +584,8 @@ export default async function handler(
     res.setHeader(
       "Content-Disposition",
       `attachment; filename="Bilibili-Video.mp4"; filename*=UTF-8''${encodeURIComponent(
-        safeTitle + ".mp4"
+        safeTitle +
+          ".mp4"
       )}`
     );
 
@@ -441,27 +605,13 @@ export default async function handler(
     );
 
     /*
-     * Send finalized MP4.
+     * ONLY NOW send MP4 to browser.
      */
-    await new Promise(
-      (resolve, reject) => {
-        const stream =
-          fs.createReadStream(
-            tempFile
-          );
-
-        stream.on(
-          "error",
-          reject
-        );
-
-        stream.on(
-          "end",
-          resolve
-        );
-
-        stream.pipe(res);
-      }
+    await pipeline(
+      fs.createReadStream(
+        tempFile
+      ),
+      res
     );
 
     console.log(
@@ -476,7 +626,7 @@ export default async function handler(
     if (
       !res.headersSent
     ) {
-      return res.status(500).json({
+      return res.status(502).json({
         success: false,
         error:
           error.message ||
@@ -484,18 +634,19 @@ export default async function handler(
       });
     }
 
-    if (!res.destroyed) {
+    if (
+      !res.destroyed
+    ) {
       res.destroy();
     }
   } finally {
     /*
-     * Delete temporary MP4.
+     * Delete temporary MP4 only
+     * after browser response finishes/errors.
      */
     if (
       tempFile &&
-      fs.existsSync(
-        tempFile
-      )
+      fs.existsSync(tempFile)
     ) {
       try {
         fs.unlinkSync(
@@ -505,10 +656,10 @@ export default async function handler(
         console.log(
           "[BiliSave] Temporary MP4 deleted."
         );
-      } catch (cleanupError) {
+      } catch (error) {
         console.error(
           "[BiliSave] Temporary file cleanup failed:",
-          cleanupError
+          error
         );
       }
     }
