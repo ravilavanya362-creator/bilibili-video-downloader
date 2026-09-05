@@ -24,6 +24,50 @@ function isBilibiliUrl(value) {
   }
 }
 
+/*
+ * Convert yt-dlp headers into a small JSON object.
+ *
+ * These headers are needed because Bilibili CDN can reject
+ * direct requests with 403 Forbidden.
+ */
+function getStreamHeaders(format) {
+  const headers = format?.http_headers || {};
+
+  const allowed = {};
+
+  for (const [key, value] of Object.entries(headers)) {
+    const lower = key.toLowerCase();
+
+    if (
+      lower === "user-agent" ||
+      lower === "referer" ||
+      lower === "origin"
+    ) {
+      allowed[key] = String(value);
+    }
+  }
+
+  /*
+   * Fallback headers if yt-dlp does not provide them.
+   */
+  if (!allowed["User-Agent"]) {
+    allowed["User-Agent"] =
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36";
+  }
+
+  if (!allowed["Referer"]) {
+    allowed["Referer"] =
+      "https://www.bilibili.com/";
+  }
+
+  if (!allowed["Origin"]) {
+    allowed["Origin"] =
+      "https://www.bilibili.com";
+  }
+
+  return allowed;
+}
+
 function runYtDlp(url) {
   return new Promise((resolve, reject) => {
     const args = [
@@ -86,7 +130,9 @@ function runYtDlp(url) {
         const info = JSON.parse(stdout);
 
         /*
-         * Find a combined video + audio format.
+         * ==========================================
+         * COMBINED FORMAT
+         * ==========================================
          */
         const combinedFormat = (info.formats || [])
           .filter(
@@ -99,11 +145,14 @@ function runYtDlp(url) {
           )
           .sort(
             (a, b) =>
-              (b.height || 0) - (a.height || 0)
+              (b.height || 0) -
+              (a.height || 0)
           )[0];
 
         /*
-         * Best video-only format.
+         * ==========================================
+         * VIDEO-ONLY FORMAT
+         * ==========================================
          */
         const videoFormat = (info.formats || [])
           .filter(
@@ -117,11 +166,14 @@ function runYtDlp(url) {
           )
           .sort(
             (a, b) =>
-              (b.height || 0) - (a.height || 0)
+              (b.height || 0) -
+              (a.height || 0)
           )[0];
 
         /*
-         * Best audio-only format.
+         * ==========================================
+         * AUDIO-ONLY FORMAT
+         * ==========================================
          */
         const audioFormat = (info.formats || [])
           .filter(
@@ -134,24 +186,114 @@ function runYtDlp(url) {
           )
           .sort(
             (a, b) =>
-              (b.abr || 0) - (a.abr || 0)
+              (b.abr || 0) -
+              (a.abr || 0)
           )[0];
 
         let directUrl = null;
         let videoUrl = null;
         let audioUrl = null;
 
+        let directHeaders = {};
+        let videoHeaders = {};
+        let audioHeaders = {};
+
+        /*
+         * Combined stream.
+         */
         if (combinedFormat) {
           directUrl = combinedFormat.url;
+
+          directHeaders =
+            getStreamHeaders(
+              combinedFormat
+            );
         } else {
-          videoUrl = videoFormat?.url || null;
-          audioUrl = audioFormat?.url || null;
+          /*
+           * Separate streams.
+           */
+          videoUrl =
+            videoFormat?.url || null;
+
+          audioUrl =
+            audioFormat?.url || null;
+
+          if (videoFormat) {
+            videoHeaders =
+              getStreamHeaders(
+                videoFormat
+              );
+          }
+
+          if (audioFormat) {
+            audioHeaders =
+              getStreamHeaders(
+                audioFormat
+              );
+          }
         }
 
-        if (!directUrl && (!videoUrl || !audioUrl)) {
+        if (
+          !directUrl &&
+          (!videoUrl || !audioUrl)
+        ) {
           throw new Error(
             "No downloadable video streams were found."
           );
+        }
+
+        /*
+         * ==========================================
+         * DOWNLOAD URL
+         * ==========================================
+         *
+         * IMPORTANT:
+         * Headers are now passed to download.js.
+         *
+         * yt-dlp is NOT executed again.
+         */
+        let downloadUrl =
+          `/api/download?title=${encodeURIComponent(
+            info.title ||
+              "Bilibili Video"
+          )}`;
+
+        if (directUrl) {
+          downloadUrl +=
+            `&directUrl=${encodeURIComponent(
+              directUrl
+            )}`;
+
+          downloadUrl +=
+            `&directHeaders=${encodeURIComponent(
+              JSON.stringify(
+                directHeaders
+              )
+            )}`;
+        } else {
+          downloadUrl +=
+            `&videoUrl=${encodeURIComponent(
+              videoUrl
+            )}`;
+
+          downloadUrl +=
+            `&audioUrl=${encodeURIComponent(
+              audioUrl
+            )}`;
+
+          downloadUrl +=
+            `&videoHeaders=${encodeURIComponent(
+              JSON.stringify(
+                videoHeaders
+              )
+            )}`;
+
+          downloadUrl +=
+            `&audioHeaders=${encodeURIComponent(
+              JSON.stringify(
+                audioHeaders
+              )
+            )}`;
         }
 
         resolve({
@@ -168,36 +310,19 @@ function runYtDlp(url) {
           duration:
             info.duration || 0,
 
-          /*
-           * Combined stream = direct download.
-           */
           directUrl,
 
-          /*
-           * Separate streams = FFmpeg merge.
-           */
           videoUrl,
 
           audioUrl,
 
-          /*
-           * Download endpoint receives the
-           * already extracted stream URLs.
-           */
-          downloadUrl:
-            `/api/download?title=${encodeURIComponent(
-              info.title || "Bilibili Video"
-            )}${
-              directUrl
-                ? `&directUrl=${encodeURIComponent(
-                    directUrl
-                  )}`
-                : `&videoUrl=${encodeURIComponent(
-                    videoUrl
-                  )}&audioUrl=${encodeURIComponent(
-                    audioUrl
-                  )}`
-            }`,
+          videoHeaders,
+
+          audioHeaders,
+
+          directHeaders,
+
+          downloadUrl,
         });
       } catch (error) {
         reject(error);
@@ -206,12 +331,18 @@ function runYtDlp(url) {
   });
 }
 
-export default async function handler(req, res) {
+export default async function handler(
+  req,
+  res
+) {
   if (
     req.method !== "POST" &&
     req.method !== "GET"
   ) {
-    res.setHeader("Allow", "POST, GET");
+    res.setHeader(
+      "Allow",
+      "POST, GET"
+    );
 
     return res.status(405).json({
       error: "Method not allowed",
@@ -220,12 +351,17 @@ export default async function handler(req, res) {
 
   const url =
     req.method === "POST"
-      ? String(req.body?.url || "").trim()
-      : String(req.query?.url || "").trim();
+      ? String(
+          req.body?.url || ""
+        ).trim()
+      : String(
+          req.query?.url || ""
+        ).trim();
 
   if (!url) {
     return res.status(400).json({
-      error: "Please enter a Bilibili URL.",
+      error:
+        "Please enter a Bilibili URL.",
     });
   }
 
@@ -241,11 +377,12 @@ export default async function handler(req, res) {
       "[BiliSave] Extracting video information..."
     );
 
-    const result = await runYtDlp(url);
+    const result =
+      await runYtDlp(url);
 
     if (result.directUrl) {
       console.log(
-        "[BiliSave] Combined stream found. Direct download."
+        "[BiliSave] Combined stream found."
       );
     } else {
       console.log(
@@ -253,7 +390,13 @@ export default async function handler(req, res) {
       );
     }
 
-    return res.status(200).json(result);
+    console.log(
+      "[BiliSave] CDN headers captured."
+    );
+
+    return res
+      .status(200)
+      .json(result);
   } catch (error) {
     console.error(
       "[BiliSave] Parse error:",
