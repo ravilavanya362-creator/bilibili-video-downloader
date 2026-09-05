@@ -31,7 +31,6 @@ function runYtDlp(url) {
       "--skip-download",
       "--no-playlist",
       "--no-warnings",
-      "--no-check-certificates",
 
       "--retries",
       "2",
@@ -86,112 +85,77 @@ function runYtDlp(url) {
       try {
         const info = JSON.parse(stdout);
 
-        const formats = Array.isArray(info.formats)
-          ? info.formats
-          : [];
+        /*
+         * Find a combined video + audio format.
+         */
+        const combinedFormat = (info.formats || [])
+          .filter(
+            (f) =>
+              f.url &&
+              f.vcodec &&
+              f.vcodec !== "none" &&
+              f.acodec &&
+              f.acodec !== "none"
+          )
+          .sort(
+            (a, b) =>
+              (b.height || 0) - (a.height || 0)
+          )[0];
 
         /*
-         * Find a single stream containing BOTH
-         * video and audio.
+         * Best video-only format.
          */
-        const combinedFormats = formats
-          .filter((format) => {
-            const hasVideo =
-              format.vcodec &&
-              format.vcodec !== "none";
-
-            const hasAudio =
-              format.acodec &&
-              format.acodec !== "none";
-
-            const height =
-              Number(format.height || 0);
-
-            return (
-              format.url &&
-              hasVideo &&
-              hasAudio &&
-              height <= 1080
-            );
-          })
-          .sort((a, b) => {
-            const heightA =
-              Number(a.height || 0);
-
-            const heightB =
-              Number(b.height || 0);
-
-            if (heightA !== heightB) {
-              return heightB - heightA;
-            }
-
-            return (
-              Number(b.tbr || 0) -
-              Number(a.tbr || 0)
-            );
-          });
-
-        const directFormat =
-          combinedFormats.find(
-            (format) =>
-              String(format.ext).toLowerCase() === "mp4"
-          ) ||
-          combinedFormats[0] ||
-          null;
+        const videoFormat = (info.formats || [])
+          .filter(
+            (f) =>
+              f.url &&
+              f.vcodec &&
+              f.vcodec !== "none" &&
+              (!f.acodec ||
+                f.acodec === "none") &&
+              (f.height || 0) <= 1080
+          )
+          .sort(
+            (a, b) =>
+              (b.height || 0) - (a.height || 0)
+          )[0];
 
         /*
-         * DIRECT MODE
-         *
-         * Video + audio already together.
+         * Best audio-only format.
          */
-        if (directFormat) {
-          console.log(
-            "[BiliSave] Combined stream found:",
-            directFormat.format_id
-          );
+        const audioFormat = (info.formats || [])
+          .filter(
+            (f) =>
+              f.url &&
+              f.acodec &&
+              f.acodec !== "none" &&
+              (!f.vcodec ||
+                f.vcodec === "none")
+          )
+          .sort(
+            (a, b) =>
+              (b.abr || 0) - (a.abr || 0)
+          )[0];
 
-          return resolve({
-            success: true,
-            mode: "direct",
+        let directUrl = null;
+        let videoUrl = null;
+        let audioUrl = null;
 
-            title:
-              info.title ||
-              "Bilibili Video",
-
-            thumbnail:
-              info.thumbnail ||
-              "",
-
-            duration:
-              info.duration || 0,
-
-            quality:
-              directFormat.height
-                ? `${directFormat.height}p`
-                : "HD",
-
-            ext:
-              directFormat.ext ||
-              "mp4",
-
-            directUrl:
-              directFormat.url,
-          });
+        if (combinedFormat) {
+          directUrl = combinedFormat.url;
+        } else {
+          videoUrl = videoFormat?.url || null;
+          audioUrl = audioFormat?.url || null;
         }
 
-        /*
-         * FALLBACK MODE
-         *
-         * Video/audio are separate.
-         * /api/download will use yt-dlp + FFmpeg.
-         */
-        console.log(
-          "[BiliSave] Separate streams detected. FFmpeg fallback."
-        );
+        if (!directUrl && (!videoUrl || !audioUrl)) {
+          throw new Error(
+            "No downloadable video streams were found."
+          );
+        }
 
         resolve({
           success: true,
-          mode: "merge",
 
           title:
             info.title ||
@@ -204,22 +168,39 @@ function runYtDlp(url) {
           duration:
             info.duration || 0,
 
-          quality: "HD",
+          /*
+           * Combined stream = direct download.
+           */
+          directUrl,
 
+          /*
+           * Separate streams = FFmpeg merge.
+           */
+          videoUrl,
+
+          audioUrl,
+
+          /*
+           * Download endpoint receives the
+           * already extracted stream URLs.
+           */
           downloadUrl:
-            `/api/download?url=${encodeURIComponent(
-              url
-            )}&title=${encodeURIComponent(
-              info.title ||
-                "Bilibili Video"
-            )}`,
+            `/api/download?title=${encodeURIComponent(
+              info.title || "Bilibili Video"
+            )}${
+              directUrl
+                ? `&directUrl=${encodeURIComponent(
+                    directUrl
+                  )}`
+                : `&videoUrl=${encodeURIComponent(
+                    videoUrl
+                  )}&audioUrl=${encodeURIComponent(
+                    audioUrl
+                  )}`
+            }`,
         });
       } catch (error) {
-        reject(
-          new Error(
-            "Bilibili returned an invalid response."
-          )
-        );
+        reject(error);
       }
     });
   });
@@ -230,10 +211,7 @@ export default async function handler(req, res) {
     req.method !== "POST" &&
     req.method !== "GET"
   ) {
-    res.setHeader(
-      "Allow",
-      "POST, GET"
-    );
+    res.setHeader("Allow", "POST, GET");
 
     return res.status(405).json({
       error: "Method not allowed",
@@ -242,17 +220,12 @@ export default async function handler(req, res) {
 
   const url =
     req.method === "POST"
-      ? String(
-          req.body?.url || ""
-        ).trim()
-      : String(
-          req.query?.url || ""
-        ).trim();
+      ? String(req.body?.url || "").trim()
+      : String(req.query?.url || "").trim();
 
   if (!url) {
     return res.status(400).json({
-      error:
-        "Please enter a Bilibili URL.",
+      error: "Please enter a Bilibili URL.",
     });
   }
 
@@ -268,8 +241,17 @@ export default async function handler(req, res) {
       "[BiliSave] Extracting video information..."
     );
 
-    const result =
-      await runYtDlp(url);
+    const result = await runYtDlp(url);
+
+    if (result.directUrl) {
+      console.log(
+        "[BiliSave] Combined stream found. Direct download."
+      );
+    } else {
+      console.log(
+        "[BiliSave] Separate streams found. FFmpeg will merge."
+      );
+    }
 
     return res.status(200).json(result);
   } catch (error) {
@@ -280,14 +262,8 @@ export default async function handler(req, res) {
 
     return res.status(500).json({
       success: false,
-
       error:
         "Could not process this Bilibili video.",
-
-      details:
-        String(
-          error.message || error
-        ).slice(-1000),
     });
   }
 }
