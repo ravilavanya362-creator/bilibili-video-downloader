@@ -9,84 +9,81 @@ export default function Home({ allPosts }) {
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
   const [downloadPreparing, setDownloadPreparing] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(0);
 
   const handleDownload = async (e) => {
-  e.preventDefault();
+    e.preventDefault();
 
-  if (loading || !url.trim()) return;
+    if (loading || !url.trim()) return;
 
-  setLoading(true);
-  setError('');
-  setResult(null);
-  setDownloadPreparing(false);
+    setLoading(true);
+    setError('');
+    setResult(null);
+    setDownloadPreparing(false);
 
-  try {
-    const res = await fetch('/api/parse', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        url: url.trim(),
-      }),
-    });
+    try {
+      const res = await fetch('/api/parse', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          url: url.trim(),
+        }),
+      });
 
-    const data = await res.json();
+      const data = await res.json();
 
-    if (!res.ok || data.success === false) {
-      throw new Error(
-        data.error ||
-          'Unable to process this video.'
+      if (!res.ok || data.success === false) {
+        throw new Error(
+          data.error || 'Unable to process this video.'
+        );
+      }
+
+      /*
+       * Parse.js should return either:
+       *
+       * mode: "direct"
+       * directUrl: "..."
+       *
+       * OR
+       *
+       * mode: "merge"
+       * downloadUrl: "/api/download?..."
+       */
+
+      let videoUrl = '';
+
+      if (data.mode === 'direct' && data.directUrl) {
+        videoUrl = data.directUrl;
+      } else if (data.mode === 'merge' && data.downloadUrl) {
+        videoUrl = data.downloadUrl;
+      } else if (data.downloadUrl) {
+        videoUrl = data.downloadUrl;
+      } else if (data.directUrl) {
+        videoUrl = data.directUrl;
+      }
+
+      if (!videoUrl) {
+        throw new Error(
+          'No downloadable video was found.'
+        );
+      }
+
+      setResult({
+        ...data,
+        videoUrl,
+      });
+
+    } catch (err) {
+      setError(
+        err.message || 'Something went wrong.'
       );
+    } finally {
+      setLoading(false);
     }
+  };
 
-    let videoUrl = '';
-
-    if (
-      data.mode === 'direct' &&
-      data.directUrl
-    ) {
-      videoUrl = `/api/download?title=${encodeURIComponent(
-        data.title || 'Bilibili Video'
-      )}&sourceUrl=${encodeURIComponent(
-        url.trim()
-      )}&directUrl=${encodeURIComponent(
-        data.directUrl
-      )}&directHeaders=${encodeURIComponent(
-        JSON.stringify(
-          data.directHeaders || {}
-        )
-      )}`;
-    } else if (
-      data.mode === 'merge' &&
-      data.downloadUrl
-    ) {
-      videoUrl = data.downloadUrl;
-    } else if (
-      data.downloadUrl
-    ) {
-      videoUrl = data.downloadUrl;
-    }
-
-    if (!videoUrl) {
-      throw new Error(
-        'No downloadable video was found.'
-      );
-    }
-
-    setResult({
-      ...data,
-      videoUrl,
-    });
-  } catch (err) {
-    setError(
-      err.message ||
-        'Something went wrong.'
-    );
-  } finally {
-    setLoading(false);
-  }
-};
   const handlePaste = async () => {
     try {
       const text = await navigator.clipboard.readText();
@@ -100,16 +97,27 @@ export default function Home({ allPosts }) {
   };
 
   /*
-   * Download button handler
+   * Download button handler - streams directly from our server (which
+   * pipes ffmpeg's live output straight through) so the browser's own
+   * download starts immediately on click, like a normal file download.
    */
   const handleVideoDownload = () => {
-  if (!result?.videoUrl || downloadPreparing) return;
+    if (!result?.videoUrl) return;
 
-  setDownloadPreparing(true);
-  setError('');
+    setDownloadPreparing(true);
+    setError('');
 
-  window.location.assign(result.videoUrl);
-};
+    const link = document.createElement('a');
+    link.href = `/api/direct-download?url=${encodeURIComponent(result.videoUrl)}&title=${encodeURIComponent(result.title || 'Bilibili Video')}`;
+    link.download = `${result.title || 'Bilibili Video'}.mp4`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+
+    // Browser takes over from here; just clear our own "starting" message
+    // after a few seconds since we can't track native download progress.
+    setTimeout(() => setDownloadPreparing(false), 6000);
+  };
 
   /*
    * Display file size when Parse.js provides it.
@@ -446,9 +454,27 @@ export default function Home({ allPosts }) {
                     }}
                   >
 
-                    ⏳ Your video is preparing
-                    for download...
-                    <br />
+                    ⏳ Downloading... {Math.round(downloadProgress)}%
+                    <div
+                      style={{
+                        marginTop: '6px',
+                        height: '6px',
+                        width: '100%',
+                        background: '#dcfce7',
+                        borderRadius: '99px',
+                        overflow: 'hidden',
+                      }}
+                    >
+                      <div
+                        style={{
+                          height: '100%',
+                          width: `${Math.max(4, Math.round(downloadProgress))}%`,
+                          background: '#22c55e',
+                          borderRadius: '99px',
+                          transition: 'width 0.4s ease',
+                        }}
+                      />
+                    </div>
 
                     <span
                       style={{
@@ -456,7 +482,7 @@ export default function Home({ allPosts }) {
                         color: '#64748b',
                       }}
                     >
-                      Please wait a moment.
+                      {downloadProgress >= 100 ? 'Finalizing video, almost done...' : "Don't close this page."}
                     </span>
 
                   </div>
@@ -777,427 +803,4 @@ export default function Home({ allPosts }) {
                   className="post-card"
                   style={{
                     borderRadius: '24px',
-                    background: '#ffffff',
-                    border:
-                      '1px solid rgba(226, 232, 240, 0.9)',
-                    boxShadow:
-                      '0 10px 30px -5px rgba(0, 0, 0, 0.05)',
-                    overflow: 'hidden',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    textDecoration: 'none',
-                  }}
-                >
-
-                  <div
-                    className="post-thumb"
-                    style={{
-                      background: cardBg,
-                      height: '140px',
-                      position: 'relative',
-                    }}
-                  >
-
-                    <div
-                      className="thumb-visual"
-                      style={{
-                        padding: '16px 20px',
-                        height: '100%',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        justifyContent: 'space-between',
-                      }}
-                    >
-
-                      <div
-                        className="thumb-top-row"
-                        style={{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                        }}
-                      >
-
-                        {post.category ? (
-
-                          <span
-                            className="thumb-tag"
-                            style={{
-                              background:
-                                'rgba(255, 255, 255, 0.22)',
-                              backdropFilter:
-                                'blur(8px)',
-                              border:
-                                '1px solid rgba(255, 255, 255, 0.35)',
-                              color: '#fff',
-                              fontWeight: '800',
-                              fontSize: '0.65rem',
-                              padding: '4px 10px',
-                              borderRadius: '99px',
-                              textTransform: 'uppercase',
-                            }}
-                          >
-                            {post.category}
-                          </span>
-
-                        ) : (
-                          <span />
-                        )}
-
-
-                        <div
-                          className="thumb-icon-badge"
-                          style={{
-                            width: '38px',
-                            height: '38px',
-                            borderRadius: '10px',
-                            background:
-                              'rgba(255, 255, 255, 0.25)',
-                            border:
-                              '1px solid rgba(255, 255, 255, 0.4)',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                          }}
-                        >
-
-                          <span
-                            style={{
-                              fontSize: '1.2rem',
-                              lineHeight: 1,
-                            }}
-                          >
-                            {post.emoji || '📄'}
-                          </span>
-
-                        </div>
-
-                      </div>
-
-
-                      {post.tagline && (
-
-                        <div className="thumb-heading">
-
-                          <p
-                            className="thumb-title"
-                            style={{
-                              fontSize: '0.9rem',
-                              color: '#fff',
-                              fontWeight: '700',
-                              textShadow:
-                                '0 2px 4px rgba(0,0,0,0.2)',
-                            }}
-                          >
-                            {post.tagline}
-                          </p>
-
-                        </div>
-
-                      )}
-
-                    </div>
-
-                  </div>
-
-
-                  <div
-                    className="post-card-body"
-                    style={{
-                      padding:
-                        '20px 22px 22px',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      flex: 1,
-                    }}
-                  >
-
-                    <div
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        marginBottom: '8px',
-                      }}
-                    >
-
-                      <span
-                        className="post-date"
-                        style={{
-                          fontSize: '0.75rem',
-                          fontWeight: '700',
-                          color: '#94a3b8',
-                          textTransform: 'uppercase',
-                        }}
-                      >
-                        {new Date(
-                          post.date
-                        ).toLocaleDateString(
-                          'en-US',
-                          {
-                            year: 'numeric',
-                            month: 'short',
-                            day: 'numeric',
-                          }
-                        )}
-                      </span>
-
-
-                      {post.readingTime && (
-                        <>
-                          <span
-                            style={{
-                              color: '#cbd5e1',
-                            }}
-                          >
-                            •
-                          </span>
-
-                          <span
-                            style={{
-                              fontSize: '0.75rem',
-                              fontWeight: '700',
-                              color: '#94a3b8',
-                            }}
-                          >
-                            {post.readingTime}
-                          </span>
-                        </>
-                      )}
-
-                    </div>
-
-
-                    <h3
-                      style={{
-                        fontSize: '1.1rem',
-                        fontWeight: '800',
-                        color:
-                          'var(--text-main)',
-                        marginBottom: '8px',
-                        lineHeight: '1.35',
-                      }}
-                    >
-                      {post.title}
-                    </h3>
-
-
-                    <p
-                      style={{
-                        fontSize: '0.9rem',
-                        color:
-                          'var(--text-muted)',
-                        lineHeight: '1.55',
-                        marginBottom: '16px',
-                        flex: 1,
-                        display:
-                          '-webkit-box',
-                        WebkitLineClamp: 2,
-                        WebkitBoxOrient:
-                          'vertical',
-                        overflow: 'hidden',
-                      }}
-                    >
-                      {post.excerpt}
-                    </p>
-
-
-                    <div
-                      style={{
-                        paddingTop: '12px',
-                        borderTop:
-                          '1px solid #f1f5f9',
-                      }}
-                    >
-
-                      <span
-                        className="post-read-more"
-                        style={{
-                          color: '#ff0844',
-                          fontWeight: '800',
-                          fontSize: '0.85rem',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '4px',
-                        }}
-                      >
-                        Read full article →
-                      </span>
-
-                    </div>
-
-                  </div>
-
-                </Link>
-
-              );
-
-            })}
-
-          </div>
-
-        </div>
-
-      </section>
-
-
-      {/* =========================
-          FAQ SECTION
-      ========================== */}
-
-      <section className="faq-section">
-
-        <div
-          className="container"
-          style={{
-            maxWidth: '920px',
-          }}
-        >
-
-          <div
-            style={{
-              textAlign: 'center',
-              marginBottom: '32px',
-            }}
-          >
-
-            <div
-              className="eyebrow"
-              style={{
-                background:
-                  'rgba(255, 8, 68, 0.08)',
-                color: '#ff0844',
-                border:
-                  '1px solid rgba(255, 8, 68, 0.15)',
-              }}
-            >
-              HELP CENTER
-            </div>
-
-            <h2 className="howto-main-title">
-              Frequently Asked Questions
-            </h2>
-
-            <p className="howto-subtitle">
-              Got questions about downloading
-              from Bilibili? We've got answers.
-            </p>
-
-          </div>
-
-
-          <div className="faq-list">
-
-            <FaqItem
-              question="Is Bili Save completely free to use?"
-              answer="Yes! Bili Save is 100% free with no hidden charges, subscription walls, or download limits."
-            />
-
-            <FaqItem
-              question="Do I need to install any app or extension?"
-              answer="No installation required. You can download videos directly from your web browser on Android, iPhone, PC, or Mac."
-            />
-
-            <FaqItem
-              question="Where are the downloaded videos saved?"
-              answer="Videos are saved directly into your device's default Downloads folder automatically."
-            />
-
-            <FaqItem
-              question="Can I download videos in 1080p or 4K?"
-              answer="Yes, depending on the source quality uploaded on Bilibili, the downloader extracts the highest available HD resolution."
-            />
-
-          </div>
-
-        </div>
-
-      </section>
-
-    </Layout>
-  );
-}
-
-
-/* =========================
-   FAQ ITEM
-========================= */
-
-function FaqItem({ question, answer }) {
-
-  const [isOpen, setIsOpen] =
-    useState(false);
-
-  return (
-
-    <div
-      className={`faq-item ${
-        isOpen ? 'faq-open' : ''
-      }`}
-    >
-
-      <button
-        className="faq-question"
-        onClick={() =>
-          setIsOpen(!isOpen)
-        }
-      >
-
-        <span>{question}</span>
-
-        <svg
-          width="20"
-          height="20"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-          strokeWidth="2.5"
-          style={{
-            transform: isOpen
-              ? 'rotate(180deg)'
-              : 'rotate(0deg)',
-            transition:
-              'transform 0.2s ease',
-          }}
-        >
-
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            d="M19 9l-7 7-7-7"
-          />
-
-        </svg>
-
-      </button>
-
-
-      {isOpen && (
-
-        <div className="faq-answer">
-          {answer}
-        </div>
-
-      )}
-
-    </div>
-
-  );
-}
-
-
-/* =========================
-   STATIC PROPS
-========================= */
-
-export async function getStaticProps() {
-
-  const allPosts =
-    getAllPosts();
-
-  return {
-    props: {
-      allPosts,
-    },
-  };
-}
+          
