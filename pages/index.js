@@ -11,78 +11,82 @@ export default function Home({ allPosts }) {
   const [downloadPreparing, setDownloadPreparing] = useState(false);
 
   const handleDownload = async (e) => {
-    e.preventDefault();
+  e.preventDefault();
 
-    if (loading || !url.trim()) return;
+  if (loading || !url.trim()) return;
 
-    setLoading(true);
-    setError('');
-    setResult(null);
-    setDownloadPreparing(false);
+  setLoading(true);
+  setError('');
+  setResult(null);
+  setDownloadPreparing(false);
 
-    try {
-      const res = await fetch('/api/parse', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          url: url.trim(),
-        }),
-      });
+  try {
+    const res = await fetch('/api/parse', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        url: url.trim(),
+      }),
+    });
 
-      const data = await res.json();
+    const data = await res.json();
 
-      if (!res.ok || data.success === false) {
-        throw new Error(
-          data.error || 'Unable to process this video.'
-        );
-      }
-
-      /*
-       * Parse.js should return either:
-       *
-       * mode: "direct"
-       * directUrl: "..."
-       *
-       * OR
-       *
-       * mode: "merge"
-       * downloadUrl: "/api/download?..."
-       */
-
-      let videoUrl = '';
-
-      if (data.mode === 'direct' && data.directUrl) {
-        videoUrl = data.directUrl;
-      } else if (data.mode === 'merge' && data.downloadUrl) {
-        videoUrl = data.downloadUrl;
-      } else if (data.downloadUrl) {
-        videoUrl = data.downloadUrl;
-      } else if (data.directUrl) {
-        videoUrl = data.directUrl;
-      }
-
-      if (!videoUrl) {
-        throw new Error(
-          'No downloadable video was found.'
-        );
-      }
-
-      setResult({
-        ...data,
-        videoUrl,
-      });
-
-    } catch (err) {
-      setError(
-        err.message || 'Something went wrong.'
+    if (!res.ok || data.success === false) {
+      throw new Error(
+        data.error ||
+          'Unable to process this video.'
       );
-    } finally {
-      setLoading(false);
     }
-  };
 
+    let videoUrl = '';
+
+    if (
+      data.mode === 'direct' &&
+      data.directUrl
+    ) {
+      videoUrl = `/api/download?title=${encodeURIComponent(
+        data.title || 'Bilibili Video'
+      )}&sourceUrl=${encodeURIComponent(
+        url.trim()
+      )}&directUrl=${encodeURIComponent(
+        data.directUrl
+      )}&directHeaders=${encodeURIComponent(
+        JSON.stringify(
+          data.directHeaders || {}
+        )
+      )}`;
+    } else if (
+      data.mode === 'merge' &&
+      data.downloadUrl
+    ) {
+      videoUrl = data.downloadUrl;
+    } else if (
+      data.downloadUrl
+    ) {
+      videoUrl = data.downloadUrl;
+    }
+
+    if (!videoUrl) {
+      throw new Error(
+        'No downloadable video was found.'
+      );
+    }
+
+    setResult({
+      ...data,
+      videoUrl,
+    });
+  } catch (err) {
+    setError(
+      err.message ||
+        'Something went wrong.'
+    );
+  } finally {
+    setLoading(false);
+  }
+};
   const handlePaste = async () => {
     try {
       const text = await navigator.clipboard.readText();
@@ -99,37 +103,13 @@ export default function Home({ allPosts }) {
    * Download button handler
    */
   const handleVideoDownload = () => {
-    if (!result?.videoUrl) return;
+  if (!result?.videoUrl || downloadPreparing) return;
 
-    setDownloadPreparing(true);
+  setDownloadPreparing(true);
+  setError('');
 
-    /*
-     * Start browser download.
-     */
-    const link = document.createElement('a');
-
-    link.href = result.videoUrl;
-
-    link.download =
-      `${result.title || 'Bilibili Video'}.mp4`;
-
-    link.target = '_blank';
-
-    link.rel = 'noopener noreferrer';
-
-    document.body.appendChild(link);
-
-    link.click();
-
-    link.remove();
-
-    /*
-     * Keep the message visible briefly.
-     */
-    setTimeout(() => {
-      setDownloadPreparing(false);
-    }, 8000);
-  };
+  window.location.assign(result.videoUrl);
+};
 
   /*
    * Display file size when Parse.js provides it.
